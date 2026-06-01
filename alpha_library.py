@@ -45,8 +45,14 @@ class AlphaFactory:
         return (df['Close'] / df['High'].rolling(250).max()).iloc[-1]
         
     @staticmethod
-    def alpha_8_relative_strength(df, benchmark_df): 
-        return (df['Close'].pct_change(20).iloc[-1] - benchmark_df['Close'].pct_change(20).iloc[-1]) * 100
+    def alpha_8_relative_strength(df, benchmark_df):
+        df_val = df['Close'].pct_change(20).iloc[-1]
+        bench_val = benchmark_df['Close'].pct_change(20).iloc[-1]
+        
+        # yfinance 최신 버전의 MultiIndex(Series) 반환 이슈 해결 (단일 스칼라 값으로 추출)
+        if isinstance(df_val, pd.Series): df_val = df_val.iloc[0]
+        if isinstance(bench_val, pd.Series): bench_val = bench_val.iloc[0]
+        return float((df_val - bench_val) * 100)
 
     # ==========================================
     # [카테고리 2] 가격 반전 및 기술적 지표 (9~16)
