@@ -1,14 +1,33 @@
 import FinanceDataReader as fdr
 import yfinance as yf
 import pandas as pd
+import numpy as np
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
-from alpha_library import AlphaFactory # 🚀 추가: 알파 무기고 불러오기
-import concurrent.futures # 🚀 추가: 병렬 처리를 위한 모듈
+from alpha_library import AlphaFactory
+import concurrent.futures
 import time
 import random
 import tkinter as tk
 from tkinter import filedialog
+import os
+import json
+import threading
+import argparse
+import sys
+from portfolio_state import load_portfolio_state, sync_portfolio_state, save_portfolio_state
+
+# Windows 콘솔 인코딩(CP949 등)으로 인한 출력 오류(UnicodeEncodeError) 방지를 위해 print 함수 오버라이딩
+_original_print = print
+def print(*args, **kwargs):
+    sep = kwargs.get('sep', ' ')
+    text = sep.join(str(arg) for arg in args)
+    try:
+        _original_print(text, **{k: v for k, v in kwargs.items() if k != 'sep'})
+    except UnicodeEncodeError:
+        encoding = sys.stdout.encoding or 'utf-8'
+        safe_text = text.encode(encoding, errors='replace').decode(encoding)
+        _original_print(safe_text, **{k: v for k, v in kwargs.items() if k != 'sep'})
 
 # VADER 감성 분석 사전 다운로드 (최초 1회 실행 시 자동 다운로드)
 try:
@@ -18,42 +37,112 @@ except LookupError:
 
 FINBERT_PIPELINE = None # FinBERT 모델 로딩 캐시용 변수
 
-def fetch_market_data(start_date='2020-01-01'): # 수정: 백테스트를 위해 2020년부터 수집
-    """
-    시장 가격 및 거시경제 지표를 수집하는 함수
-    """
-    print("데이터 수집을 시작합니다...")
-    
+class Colors:
+    HEADER = '\033[95m'
+    BLUE = '\033[94m'
+    CYAN = '\033[96m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    RED = '\033[91m'
+    BOLD = '\033[1m'
+    RESET = '\033[0m'
+
+try:
+    import colorama
+    colorama.init()
+except ImportError:
+    pass
+
+def log_info(msg): print(f"{Colors.CYAN}[INFO] {msg}{Colors.RESET}")
+def log_success(msg): print(f"{Colors.GREEN}[SUCCESS] {msg}{Colors.RESET}")
+def log_warn(msg): print(f"{Colors.YELLOW}[WARNING] {msg}{Colors.RESET}")
+def log_error(msg): print(f"{Colors.RED}[ERROR] {msg}{Colors.RESET}")
+
+# 의존성 없이 로컬 .env 파일을 파싱하는 헬퍼 함수
+def load_dotenv(dotenv_path=".env"):
+    if os.path.exists(dotenv_path):
+        try:
+            with open(dotenv_path, "r", encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    os.environ[k.strip()] = v.strip()
+        except Exception as e:
+            log_warn(f".env 파일을 읽는 중 오류가 발생했습니다: {e}")
+
+CACHE_FILE = '.financials_cache.json'
+cache_lock = threading.Lock()
+
+def load_financials_cache():
+    if not os.path.exists(CACHE_FILE):
+        return {}
     try:
-        # 1. 미국 10년물 국채 금리 (야후 파이낸스 ^TNX 활용 - 안정성 높음)
-        rates = yf.download('^TNX', start=start_date)
-        
-        # 2. S&P 500 지수 (시장 전체 흐름 확인용)
-        sp500 = yf.download('^GSPC', start=start_date)
-        
-        # 3. 공포지수 VIX (투자 심리 확인용)
-        vix = yf.download('^VIX', start=start_date)
-        
-        print("데이터 수집 완료!\n")
-        return rates, sp500, vix
-        
+        with open(CACHE_FILE, 'r', encoding='utf-8') as f:
+            return json.load(f)
     except Exception as e:
-        print(f"데이터 수집 중 오류가 발생했습니다: {e}")
+        log_warn(f"캐시 파일을 읽는 중 오류가 발생했습니다: {e}")
+        return {}
+
+def save_financials_cache(cache):
+    with cache_lock:
+        try:
+            with open(CACHE_FILE, 'w', encoding='utf-8') as f:
+                json.dump(cache, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            log_warn(f"캐시 파일을 저장하는 중 오류가 발생했습니다: {e}")
+
+def get_cached_financials(ticker, cache, ttl_days=7):
+    if ticker not in cache:
+        return None
+    data = cache[ticker]
+    timestamp = data.get('timestamp', 0)
+    # TTL(기본 7일) 이내 데이터인지 확인
+    if time.time() - timestamp < ttl_days * 86400:
+        return data.get('info', {})
+    return None
+
+def update_cached_financials(ticker, info, cache):
+    with cache_lock:
+        cache[ticker] = {
+            'timestamp': time.time(),
+            'info': info
+        }
+    save_financials_cache(cache)
+
+def print_banner():
+    # CP949 인코딩 호환성을 위해 표준 ASCII 문자만 사용하는 안전한 배너 디자인
+    banner = f"""
+{Colors.BLUE}================================================================
+  ___                 _       ___   ___
+ / _ \ _  _ __ _ _ _ | |_    |_  ) / _ \\
+| (_) | || / _` | ' \|  _|    / / | (_) |
+ \__\_\\_,_\__,_|_||_|\__|   /___(_)___/
+         Global Quant & Portfolio Engine
+================================================================{Colors.RESET}
+    """
+    print(banner)
+
+def fetch_market_data(start_date='2020-01-01'):
+    log_info("시장 거시경제 지표 데이터를 수집 중...")
+    try:
+        rates = yf.download('^TNX', start=start_date, progress=False)
+        sp500 = yf.download('^GSPC', start=start_date, progress=False)
+        vix = yf.download('^VIX', start=start_date, progress=False)
+        log_success("거시경제 데이터 수집 완료!")
+        return rates, sp500, vix
+    except Exception as e:
+        log_error(f"거시경제 데이터 수집 중 오류가 발생했습니다: {e}")
         return None, None, None
 
 def classify_market_regime(df):
-    """
-    수집된 데이터를 바탕으로 현재 시장의 '계절(국면)'을 판단하는 함수
-    """
-    # 1. 지표 계산
-    df['MA200'] = df['S&P500_Close'].rolling(window=200).mean() # 200일 장기 추세선
-    df['Rate_MA20'] = df['US10Y_Rate'].rolling(window=20).mean() # 금리 추세
+    df['MA200'] = df['S&P500_Close'].rolling(window=200).mean()
+    df['Rate_MA20'] = df['US10Y_Rate'].rolling(window=20).mean()
     
-    # 2. 전체 기간에 대한 국면 결정 (백테스트용)
     def get_regime(row):
         if pd.isna(row['MA200']) or pd.isna(row['Rate_MA20']):
-            return "UNKNOWN (데이터 부족)" # 200일이 채워지지 않은 초기 데이터
-        
+            return "UNKNOWN"
         if row['S&P500_Close'] > row['MA200']:
             if row['VIX_Close'] < 20:
                 return "SPRING (적극 매수)"
@@ -65,50 +154,48 @@ def classify_market_regime(df):
             else:
                 return "WINTER (현금화/숏)"
                 
-    # DataFrame 전체에 로직 적용하여 'Regime' 컬럼 추가
     df['Regime'] = df.apply(get_regime, axis=1)
-    
-    # 3. 최근 국면 반환
     return df['Regime'].iloc[-1]
 
-def get_neutralized_alpha(market='SP500'):
-    """
-    알파 라이브러리의 31개 핵심 지표들을 결합하여 종목을 평가하고,
-    업종 평균을 빼서 '순수 실력(Pure Alpha)'을 계산합니다.
-    """
-    print(f"\n=== [알파 엔진] 31개 멀티 팩터 기반 업종 중립화 데이터 수집 중 ({market}) ===")
+def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
+    log_info(f"[알파 엔진] 업종 중립화 분석 중... (Market: {market})")
     
-    benchmark_ticker = '^GSPC' # 기본 벤치마크: S&P 500
+    benchmark_ticker = '^GSPC'
     
-    if market == 'SP500':
-        print("S&P 500 전체 종목을 불러옵니다. (시간이 조금 걸릴 수 있습니다...)")
-        sp500_df = fdr.StockListing('S&P500')
-        # yfinance 호환을 위해 종목 기호 중 점(.)을 대시(-)로 변경 (예: BRK.B -> BRK-B)
-        sp500_df['Symbol'] = sp500_df['Symbol'].str.replace('.', '-', regex=False)
-        # 특수기호 없이 BFB, BRKB로 들어오는 경우를 위한 하드코딩 예외 처리 추가
-        sp500_df['Symbol'] = sp500_df['Symbol'].replace({'BRKB': 'BRK-B', 'BFB': 'BF-B'})
-        stocks = dict(zip(sp500_df['Symbol'], sp500_df['Sector']))
+    if is_test:
+        log_info("테스트용 소형 유니버스를 분석합니다.")
+        stocks = {
+            'NVDA': 'Technology', 'AAPL': 'Technology', 'MSFT': 'Technology', 'AMD': 'Technology',
+            'JPM': 'Financials', 'GS': 'Financials', 'BAC': 'Financials', 'WFC': 'Financials',
+            'XOM': 'Energy', 'CVX': 'Energy', 'COP': 'Energy'
+        }
+        benchmark_ticker = '^GSPC'
+    elif market == 'SP500':
+        log_info("S&P 500 전체 종목 정보를 수집합니다.")
+        try:
+            sp500_df = fdr.StockListing('S&P500')
+            sp500_df['Symbol'] = sp500_df['Symbol'].str.replace('.', '-', regex=False)
+            sp500_df['Symbol'] = sp500_df['Symbol'].replace({'BRKB': 'BRK-B', 'BFB': 'BF-B'})
+            stocks = dict(zip(sp500_df['Symbol'], sp500_df['Sector']))
+        except Exception as e:
+            log_error(f"S&P 500 목록 조회 실패: {e}")
+            return pd.DataFrame()
     elif market == 'KRX':
-        print("한국 코스피/코스닥 시가총액 상위 100개 종목을 불러옵니다...")
+        log_info("KRX 상위 100개 종목 정보를 수집합니다.")
         try:
             krx_df = fdr.StockListing('KRX')
-            # 섹터(Industry) 정보가 있는 종목 중 상위 100개 추출
             krx_df = krx_df.dropna(subset=['Sector']).head(100)
-            
             stocks = {}
             for _, row in krx_df.iterrows():
                 code = row['Code']
                 market_type = row['Market']
-                # 야후 파이낸스 호환성을 위해 코스피는 .KS, 코스닥은 .KQ를 붙여줍니다.
                 if 'KOSDAQ' in str(market_type):
                     stocks[f"{code}.KQ"] = row['Sector']
                 else:
                     stocks[f"{code}.KS"] = row['Sector']
+            benchmark_ticker = '^KS11'
         except Exception as e:
-            # KRX 서버 차단이나 응답 변경으로 JSON 파싱이 실패할 경우의 예외 처리
-            print(f"\n⚠️ KRX 데이터 수집 실패 (FinanceDataReader 오류): {e}")
-            print("💡 팁: 터미널에서 'pip install --upgrade finance-datareader'를 실행하여 최신 버전을 설치해 보세요.")
-            print("임시로 한국 대표 우량주 20개 종목을 사용하여 분석을 진행합니다.\n")
+            log_warn(f"KRX 데이터 수집 실패: {e}. 우량주 20개로 대체합니다.")
             stocks = {
                 '005930.KS': 'Technology', '000660.KS': 'Technology', '373220.KS': 'Technology',
                 '207940.KS': 'Health Care', '005380.KS': 'Consumer Durables', '000270.KS': 'Consumer Durables',
@@ -118,54 +205,66 @@ def get_neutralized_alpha(market='SP500'):
                 '032830.KS': 'Financials', '003670.KS': 'Technology', '033780.KS': 'Technology',
                 '011200.KS': 'Industrials', '035720.KS': 'Technology'
             }
-        benchmark_ticker = '^KS11' # 한국 벤치마크: 코스피 지수
+            benchmark_ticker = '^KS11'
     else:
-        # 1. 테스트용 종목 리스트와 업종 정보
-        stocks = {
-            'NVDA': 'Technology', 'AAPL': 'Technology', 'MSFT': 'Technology', 'AMD': 'Technology',
-            'JPM': 'Financials', 'GS': 'Financials', 'BAC': 'Financials', 'WFC': 'Financials',
-            'XOM': 'Energy', 'CVX': 'Energy', 'COP': 'Energy'
-        }
+        stocks = {}
+
+    tickers = list(stocks.keys())
     
-    tickers = list(stocks.keys())    
-    
-    print(f"{len(tickers)}개 종목의 시세 데이터를 다운로드 중...")
-    # 시세 데이터 및 벤치마크 일괄 다운로드 (장기 이평선 계산을 위해 2년치)
-    # group_by='ticker'는 각 티커별로 DataFrame을 생성하여 딕셔너리 형태로 반환
-    # yfinance는 최대 700-800개 티커까지 한 번에 다운로드 가능하지만, 너무 많으면 오류 발생 가능
-    # S&P500 전체는 약 500개이므로 가능
-    data_ohlcv = yf.download(tickers, period='2y', group_by='ticker', progress=False)
+    log_info(f"유니버스 주가 시세 데이터 다운로드 중 (티커 수: {len(tickers)})...")
+    # 중복 다운로드 코드 해결 (단일 호출로 변경)
     data_ohlcv = yf.download(tickers, period='2y', group_by='ticker', progress=True)
     benchmark_df = yf.download(benchmark_ticker, period='2y', progress=False)
     
-    def process_ticker(ticker):
-        """개별 종목의 데이터 분리, 재무 정보 수집, 알파 지표 계산을 수행하는 내부 함수"""
-        try:
-            # 짧은 대기 시간 추가 (야후 파이낸스 서버 공격(Rate Limit) 방지)
-            time.sleep(random.uniform(0.1, 0.5))
-            
-            # 종목별 OHLCV 데이터 분리
-            df_ticker_ohlcv = data_ohlcv[ticker].dropna() if len(tickers) > 1 else data_ohlcv.dropna()
+    if cache is None:
+        cache = {}
 
-            # 최소 데이터 길이 확인 (가장 긴 250일 이동평균선 계산을 위해)
+    def process_ticker(ticker):
+        try:
+            # 1. 시세 데이터 분할 추출
+            if len(tickers) == 1:
+                if isinstance(data_ohlcv.columns, pd.MultiIndex):
+                    df_ticker_ohlcv = data_ohlcv[ticker].dropna()
+                else:
+                    df_ticker_ohlcv = data_ohlcv.dropna()
+            else:
+                if ticker in data_ohlcv.columns.levels[0]:
+                    df_ticker_ohlcv = data_ohlcv[ticker].dropna()
+                else:
+                    return None
+
             if len(df_ticker_ohlcv) < 250:
                 return None
             
-            # 기업 재무 정보 (PBR, ROE 등 가치 지표용) - ⚠️ 네트워크 통신으로 인해 가장 오래 걸리는 구간
-            # 401/429 차단 방지를 위한 재시도 로직 추가
-            info = {}
-            for attempt in range(3):
-                try:
-                    info = yf.Ticker(ticker).info
-                    if info: 
-                        break
-                except Exception as e:
-                    if attempt < 2:
-                        time.sleep(2 + attempt * 2) # 에러 시 2초, 4초 대기 후 재시도
-                    else:
-                        print(f"[{ticker}] 재무 정보 수집 실패 (401 에러 등): {e}")
-            
-            # 모든 31개 알파 지표 계산 (Alpha 32는 최종 포트폴리오 선정 후 적용)
+            # 2. 기업 재무 정보 획득 (캐시 우선 확인)
+            info = get_cached_financials(ticker, cache)
+            if info is None:
+                # API 부하 방지 및 Rate Limit 대응
+                time.sleep(random.uniform(0.1, 0.3))
+                raw_info = None
+                for attempt in range(3):
+                    try:
+                        raw_info = yf.Ticker(ticker).info
+                        if raw_info:
+                            break
+                    except Exception:
+                        if attempt < 2:
+                            time.sleep(2 + attempt * 2)
+                if raw_info:
+                    info = {
+                        'priceToBook': raw_info.get('priceToBook'),
+                        'trailingPE': raw_info.get('trailingPE'),
+                        'priceToSalesTrailing12Months': raw_info.get('priceToSalesTrailing12Months'),
+                        'returnOnEquity': raw_info.get('returnOnEquity'),
+                        'operatingMargins': raw_info.get('operatingMargins'),
+                        'debtToEquity': raw_info.get('debtToEquity'),
+                        'dividendYield': raw_info.get('dividendYield'),
+                    }
+                    update_cached_financials(ticker, info, cache)
+                else:
+                    info = {}
+
+            # 3. 알파 지표 계산
             alpha_scores = {
                 'Ticker': ticker,
                 'Industry': stocks.get(ticker, 'Unknown'),
@@ -202,155 +301,425 @@ def get_neutralized_alpha(market='SP500'):
                 'alpha_31': AlphaFactory.alpha_31_dividend_yield(info),
             }
             return alpha_scores
-        except Exception as e:
+        except Exception:
             return None
 
     alpha_results = []
-    print(f"\n🚀 총 {len(tickers)}개 종목 분석 중... (멀티스레딩 병렬 처리 적용으로 속도 대폭 향상!)")
-    
-    # ⚠️ 네트워크 I/O 대기 시간을 줄이기 위해 ThreadPoolExecutor 사용
-    # 야후 파이낸스 401 차단을 방지하기 위해 워커 수를 10에서 3으로 낮춥니다.
+    log_info(f"병렬 분석 처리 실행 중 (워커: 3)...")
     completed_count = 0
     with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
         futures = {executor.submit(process_ticker, t): t for t in tickers}
         for future in concurrent.futures.as_completed(futures):
             completed_count += 1
-            # 10개 처리될 때마다 진행 상황 출력
             if completed_count % 10 == 0 or completed_count == len(tickers):
-                print(f"🔄 데이터 수집 진행 상황: {completed_count} / {len(tickers)} 종목 완료...")
-                
+                log_info(f"진행 상태: {completed_count} / {len(tickers)} 완료")
             res = future.result()
             if res is not None:
                 alpha_results.append(res)
 
     df_alpha = pd.DataFrame(alpha_results)
     if df_alpha.empty:
-        print("알파 계산을 위한 유효한 종목 데이터가 없습니다.")
+        log_warn("분석 결과 데이터가 비어 있습니다.")
         return df_alpha
+        
     df_alpha.set_index('Ticker', inplace=True)
     
-    # 결측치(데이터 부족 종목) 제거
-    df_alpha.dropna(inplace=True)
-    if df_alpha.empty:
-        print("결측치 제거 후 유효한 종목 데이터가 없습니다.")
-        return df_alpha
-    # 3. Z-Score 표준화 (단위가 다른 지표들을 더하기 위해 변환)
-    alpha_cols_to_standardize = [f'alpha_{i}' for i in range(1, 32)] # 32번 제외
+    # 3. 데이터 정제: 가격 데이터가 불충분한 종목만 탈락시키고,
+    # 재무 데이터 결측치(PBR, 배당 등)는 전체 평균값으로 대체(Imputation)하여 종목 누락 방지
+    price_cols = [f'alpha_{i}' for i in range(1, 25)]
+    df_alpha.dropna(subset=price_cols, inplace=True)
     
-    # 모든 알파 컬럼이 DataFrame에 있는지 확인
-    existing_alpha_cols = [col for col in alpha_cols_to_standardize if col in df_alpha.columns]
+    if df_alpha.empty:
+        log_warn("필수 주가 데이터가 존재하는 주식이 없습니다.")
+        return df_alpha
+        
+    financial_cols = [f'alpha_{i}' for i in range(25, 32)]
+    for col in financial_cols:
+        if col in df_alpha.columns:
+            mean_val = df_alpha[col].mean()
+            if pd.isna(mean_val) or mean_val == 0:
+                df_alpha[col] = df_alpha[col].fillna(0)
+            else:
+                df_alpha[col] = df_alpha[col].fillna(mean_val)
+                
+    # Z-Score 표준화
+    alpha_cols_to_standardize = [f'alpha_{i}' for i in range(1, 32)]
+    existing_alpha_cols = [c for c in alpha_cols_to_standardize if c in df_alpha.columns]
     
     for col in existing_alpha_cols:
-        # std()가 0인 경우 (모든 값이 동일) Z-score 계산 시 NaN이 되므로 예외 처리
-        if df_alpha[col].std() == 0:
-            df_alpha[f'{col}_Z'] = 0 # 모든 값이 같으면 Z-score는 0
+        std_val = df_alpha[col].std()
+        if std_val == 0 or pd.isna(std_val):
+            df_alpha[f'{col}_Z'] = 0
         else:
-            df_alpha[f'{col}_Z'] = (df_alpha[col] - df_alpha[col].mean()) / df_alpha[col].std()
-        
-    # 4. 모든 지표 총합 계산 (멀티 팩터 스코어)
+            df_alpha[f'{col}_Z'] = (df_alpha[col] - df_alpha[col].mean()) / std_val
+            
     z_cols = [f'{col}_Z' for col in existing_alpha_cols]
     df_alpha['Total_Score'] = df_alpha[z_cols].sum(axis=1)
     
-    # 4. 🔥 핵심: 업종 중립화 (업종 거품 깎아내기)
-    # Industry 컬럼이 없는 경우 (예: 단일 종목 테스트) 예외 처리
+    # 업종 중립화 (Pure Alpha 도출)
     if 'Industry' in df_alpha.columns and len(df_alpha['Industry'].unique()) > 1:
         df_alpha['Industry_Mean_Score'] = df_alpha.groupby('Industry')['Total_Score'].transform('mean')
         df_alpha['Pure_Alpha(%)'] = df_alpha['Total_Score'] - df_alpha['Industry_Mean_Score']
     else:
-        # 업종 중립화가 불가능하거나 의미 없는 경우 Total_Score를 Pure_Alpha로 사용
         df_alpha['Pure_Alpha(%)'] = df_alpha['Total_Score']
-        print("경고: 업종 중립화를 적용할 수 없거나 의미가 없습니다 (단일 업종 또는 Industry 정보 부족).")
+        log_warn("단일 업종이거나 업종 정보가 없어 중립화를 건너뜁니다.")
 
-    df_alpha['Market'] = market # 어떤 시장(SP500/KRX)인지 표시를 추가합니다.
+    df_alpha['Market'] = 'TEST' if is_test else market
     return df_alpha.sort_values(by='Pure_Alpha(%)', ascending=False)
 
 def get_news_sentiment(ticker):
-    """
-    [Alpha 32] 특정 종목의 최근 뉴스 헤드라인을 수집하여 AI 감성(Sentiment) 점수를 계산합니다.
-    점수는 -1(매우 부정적) ~ 1(매우 긍정적) 사이를 반환합니다.
-    """
     try:
         news = yf.Ticker(ticker).news
         if not news: 
             return 0.0
             
         try:
-            # [딥러닝 AI 적용] transformers 라이브러리가 있다면 금융 특화 AI(FinBERT) 사용
             from transformers import pipeline
             global FINBERT_PIPELINE
             if FINBERT_PIPELINE is None:
-                print(f"\n[{ticker}] 🧠 금융 특화 딥러닝 AI (FinBERT) 로드 중... (최초 1회만 소요)")
+                log_info(f"[{ticker}] 🧠 금융 특화 AI (FinBERT) 모델 로딩 중...")
                 FINBERT_PIPELINE = pipeline("sentiment-analysis", model="ProsusAI/finbert")
             
             scores = []
             for article in news:
                 title = article.get('title', '')
                 if title:
-                    result = FINBERT_PIPELINE(title)[0]
-                    # FinBERT는 문맥을 이해하고 positive, negative, neutral로 반환합니다.
-                    if result['label'] == 'positive':
-                        scores.append(result['score'])     # 긍정이면 + 점수
-                    elif result['label'] == 'negative':
-                        scores.append(-result['score'])    # 부정이면 - 점수
+                    res = FINBERT_PIPELINE(title)[0]
+                    if res['label'] == 'positive':
+                        scores.append(res['score'])
+                    elif res['label'] == 'negative':
+                        scores.append(-res['score'])
                     else:
-                        scores.append(0.0)                 # 중립이면 0 점수
+                        scores.append(0.0)
             return sum(scores) / len(scores) if scores else 0.0
-            
         except ImportError:
-            # 라이브러리가 없다면 기존의 VADER(단어 사전 기반 NLP) 사용
             sia = SentimentIntensityAnalyzer()
             scores = []
             for article in news:
                 title = article.get('title', '')
                 if title:
-                    score = sia.polarity_scores(title)['compound']
-                    scores.append(score)
+                    scores.append(sia.polarity_scores(title)['compound'])
             return sum(scores) / len(scores) if scores else 0.0
     except Exception:
         return 0.0
 
-def generate_portfolio(df_alpha, capital=10000000):
+def generate_portfolio(df_alpha, capital=5000000):
     """
-    알파 점수를 바탕으로 투자 비중을 계산하여 최종 포트폴리오를 구성합니다.
+    개별 풀(미국/한국) 기준 포트폴리오 비중 배분 및 최고 순위 5개 선정
     """
-    print("\n=== [포트폴리오 구성] 자본금 배분 중 ===")
-    
-    # 1. 순수 실력이 플러스(+)인 종목 필터링
     positive_alpha = df_alpha[df_alpha['Pure_Alpha(%)'] > 0]
-    
     if positive_alpha.empty:
-        print("현재 매수할 만한 (Pure Alpha > 0) 종목이 없습니다.")
+        log_warn("Pure Alpha가 양수인 종목이 없어 포트폴리오를 구성할 수 없습니다.")
         return positive_alpha
         
-    # [핵심 변경] 미국 시장과 한국 시장 각각에서 상위 5개씩(총 10개)을 무조건 뽑도록 보장합니다.
-    if 'Market' in positive_alpha.columns:
-        top_picks = positive_alpha.groupby('Market').head(5).copy()
-    else:
-        top_picks = positive_alpha.head(5).copy()
-        
+    top_picks = positive_alpha.head(5).copy()
     top_picks = top_picks.sort_values(by='Pure_Alpha(%)', ascending=False)
-        
-    # 2. 비중 계산: Pure_Alpha 점수에 비례해서 배분
+    
     weights = (top_picks['Pure_Alpha(%)'] / top_picks['Pure_Alpha(%)'].sum()) * 100
     
-    # [추가] 특정 종목 쏠림 방지 (Max Cap 30% 제한 로직)
+    # 단일 종목 최대 비중 30% 상한 제한
     max_weight = 30.0
     while weights.max() > max_weight:
         capped_mask = weights >= max_weight
         weights[capped_mask] = max_weight
         non_capped_sum = weights[~capped_mask].sum()
-        if non_capped_sum == 0: break
+        if non_capped_sum == 0: 
+            break
         excess = 100.0 - weights.sum()
         weights[~capped_mask] += excess * (weights[~capped_mask] / non_capped_sum)
         
+    # 총합 비중을 전체의 50%로 세팅하기 전 임시 100% 분배
     top_picks['Weight(%)'] = weights
-    
-    # 3. 투자 금액 계산 (자본금 기준)
     top_picks['Invest_Amount(KRW)'] = capital * (top_picks['Weight(%)'] / 100)
-    
     return top_picks
 
+def export_to_excel(output_filename, df_portfolio, df_alpha, df_market, df_dict, df_rebal=None):
+    log_info("엑셀 결과 리포트 저장 중 (스타일링 레이아웃 적용)...")
+    try:
+        with pd.ExcelWriter(output_filename, engine='xlsxwriter') as writer:
+            workbook = writer.book
+            
+            # 프리미엄 테마 스타일 포맷 정의
+            header_format = workbook.add_format({
+                'bold': True,
+                'font_name': 'Malgun Gothic',
+                'font_size': 10,
+                'font_color': '#FFFFFF',
+                'bg_color': '#1B365D',  # Premium Dark Navy
+                'align': 'center',
+                'valign': 'vcenter',
+                'border': 1,
+                'border_color': '#D9D9D9'
+            })
+            
+            cell_format = workbook.add_format({
+                'font_name': 'Malgun Gothic',
+                'font_size': 10,
+                'valign': 'vcenter',
+                'border': 1,
+                'border_color': '#E0E0E0'
+            })
+            
+            num_format = workbook.add_format({
+                'font_name': 'Malgun Gothic',
+                'font_size': 10,
+                'valign': 'vcenter',
+                'align': 'right',
+                'border': 1,
+                'border_color': '#E0E0E0',
+                'num_format': '0.00'
+            })
+            
+            pct_format = workbook.add_format({
+                'font_name': 'Malgun Gothic',
+                'font_size': 10,
+                'valign': 'vcenter',
+                'align': 'right',
+                'border': 1,
+                'border_color': '#E0E0E0',
+                'num_format': '0.00"%"'
+            })
+            
+            krw_format = workbook.add_format({
+                'font_name': 'Malgun Gothic',
+                'font_size': 10,
+                'valign': 'vcenter',
+                'align': 'right',
+                'border': 1,
+                'border_color': '#E0E0E0',
+                'num_format': '₩#,##0'
+            })
+            
+            center_format = workbook.add_format({
+                'font_name': 'Malgun Gothic',
+                'font_size': 10,
+                'valign': 'vcenter',
+                'align': 'center',
+                'border': 1,
+                'border_color': '#E0E0E0'
+            })
+            
+            # --- Sheet 1. Final Portfolio ---
+            ws_port = workbook.add_worksheet('Final Portfolio')
+            ws_port.hide_gridlines(2)
+            ws_port.write(0, 0, "🚀 최종 추천 포트폴리오 (자본 배분안)", workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1B365D'}))
+            
+            df_port_reset = df_portfolio.reset_index().rename(columns={'index': 'Ticker'})
+            headers_port = list(df_port_reset.columns)
+            ws_port.set_row(2, 25)
+            for c_idx, h in enumerate(headers_port):
+                ws_port.write(2, c_idx, h, header_format)
+                
+            for r_idx, row in enumerate(df_port_reset.values):
+                ws_port.set_row(3 + r_idx, 20)
+                for c_idx, val in enumerate(row):
+                    col_name = headers_port[c_idx]
+                    if col_name in ['Ticker', 'Industry', 'Market']:
+                        ws_port.write(3 + r_idx, c_idx, val, center_format)
+                    elif col_name in ['Pure_Alpha(%)', 'AI_News_Score']:
+                        ws_port.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, num_format)
+                    elif col_name == 'Weight(%)':
+                        ws_port.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, pct_format)
+                    elif col_name == 'Invest_Amount(KRW)':
+                        ws_port.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, krw_format)
+                    else:
+                        ws_port.write(3 + r_idx, c_idx, val, cell_format)
+                        
+            for col_idx, col in enumerate(df_port_reset.columns):
+                max_len = max(df_port_reset[col].astype(str).map(len).max(), len(col)) + 4
+                ws_port.set_column(col_idx, col_idx, max(max_len, 15))
+                
+            # --- Sheet 2. Rebalancing Plan (선택적) ---
+            if df_rebal is not None and not df_rebal.empty:
+                ws_rebal = workbook.add_worksheet('Rebalancing Plan')
+                ws_rebal.hide_gridlines(2)
+                ws_rebal.write(0, 0, "🔄 포트폴리오 리밸런싱 주문 계획안", workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1B365D'}))
+                
+                df_rebal_reset = df_rebal.reset_index().rename(columns={'index': 'Ticker'})
+                headers_rebal = list(df_rebal_reset.columns)
+                ws_rebal.set_row(2, 25)
+                for c_idx, h in enumerate(headers_rebal):
+                    ws_rebal.write(2, c_idx, h, header_format)
+                    
+                for r_idx, row in enumerate(df_rebal_reset.values):
+                    ws_rebal.set_row(3 + r_idx, 20)
+                    for c_idx, val in enumerate(row):
+                        col_name = headers_rebal[c_idx]
+                        if col_name in ['Ticker', 'Toss_Symbol', 'Currency', 'Action', 'Reason']:
+                            ws_rebal.write(3 + r_idx, c_idx, val, center_format if col_name != 'Reason' else cell_format)
+                        elif col_name in ['Target_Weight(%)']:
+                            ws_rebal.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, pct_format)
+                        elif col_name in ['Target_Value(KRW)', 'Current_Value(KRW)', 'Diff_Value(KRW)']:
+                            ws_rebal.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, krw_format)
+                        elif col_name in ['Current_Qty', 'Target_Qty', 'Diff_Qty']:
+                            try:
+                                num_val = float(val)
+                                ws_rebal.write(3 + r_idx, c_idx, num_val, num_format)
+                            except (ValueError, TypeError):
+                                ws_rebal.write(3 + r_idx, c_idx, val, cell_format)
+                        elif col_name == 'Current_Price':
+                            ws_rebal.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, num_format)
+                        else:
+                            ws_rebal.write(3 + r_idx, c_idx, val, cell_format)
+                            
+                for col_idx, col in enumerate(df_rebal_reset.columns):
+                    max_len = max(df_rebal_reset[col].astype(str).map(len).max(), len(col)) + 4
+                    ws_rebal.set_column(col_idx, col_idx, max(max_len, 15))
+
+            # --- Sheet 3. Alpha Rankings ---
+            ws_rank = workbook.add_worksheet('Alpha Rankings')
+            ws_rank.hide_gridlines(2)
+            ws_rank.write(0, 0, "📊 전체 분석 대상 종목 알파 랭킹", workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1B365D'}))
+            
+            df_rank_reset = df_alpha.reset_index().rename(columns={'index': 'Ticker'})
+            df_rank_reset = df_rank_reset.rename(columns={'alpha_2': 'Return_20d(%)'})
+            headers_rank = list(df_rank_reset.columns)
+            ws_rank.set_row(2, 25)
+            for c_idx, h in enumerate(headers_rank):
+                ws_rank.write(2, c_idx, h, header_format)
+                
+            for r_idx, row in enumerate(df_rank_reset.values):
+                ws_rank.set_row(3 + r_idx, 18)
+                for c_idx, val in enumerate(row):
+                    col_name = headers_rank[c_idx]
+                    if col_name in ['Ticker', 'Industry', 'Market']:
+                        ws_rank.write(3 + r_idx, c_idx, val, center_format)
+                    else:
+                        try:
+                            num_val = float(val)
+                            ws_rank.write(3 + r_idx, c_idx, num_val, num_format)
+                        except (ValueError, TypeError):
+                            ws_rank.write(3 + r_idx, c_idx, val, cell_format)
+                            
+            for col_idx, col in enumerate(df_rank_reset.columns):
+                ws_rank.set_column(col_idx, col_idx, 15)
+                
+            # --- Sheet 4. Market Regime ---
+            ws_market = workbook.add_worksheet('Market Regime')
+            ws_market.hide_gridlines(2)
+            ws_market.write(0, 0, "🌍 거시경제 시장 데이터 및 국면 (최근 100일)", workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1B365D'}))
+            
+            df_m_export = df_market.tail(100).copy()
+            df_m_export.index = df_m_export.index.strftime('%Y-%m-%d')
+            df_m_reset = df_m_export.reset_index().rename(columns={'index': 'Date'})
+            headers_m = list(df_m_reset.columns)
+            ws_market.set_row(2, 25)
+            for c_idx, h in enumerate(headers_m):
+                ws_market.write(2, c_idx, h, header_format)
+                
+            for r_idx, row in enumerate(df_m_reset.values):
+                ws_market.set_row(3 + r_idx, 18)
+                for c_idx, val in enumerate(row):
+                    col_name = headers_m[c_idx]
+                    if col_name in ['Date', 'Regime']:
+                        ws_market.write(3 + r_idx, c_idx, val, center_format)
+                    else:
+                        try:
+                            num_val = float(val)
+                            ws_market.write(3 + r_idx, c_idx, num_val, num_format)
+                        except (ValueError, TypeError):
+                            ws_market.write(3 + r_idx, c_idx, val, cell_format)
+                            
+            for col_idx, col in enumerate(df_m_reset.columns):
+                max_len = max(df_m_reset[col].astype(str).map(len).max(), len(col)) + 4
+                ws_market.set_column(col_idx, col_idx, max(max_len, 15))
+                
+            # --- Sheet 5. Alpha Dictionary ---
+            ws_dict = workbook.add_worksheet('Alpha Dictionary')
+            ws_dict.hide_gridlines(2)
+            ws_dict.write(0, 0, "📚 32가지 퀀트 알파 지표 사전", workbook.add_format({'bold': True, 'font_size': 14, 'font_color': '#1B365D'}))
+            
+            headers_dict = list(df_dict.columns)
+            ws_dict.set_row(2, 25)
+            for c_idx, h in enumerate(headers_dict):
+                ws_dict.write(2, c_idx, h, header_format)
+                
+            for r_idx, row in enumerate(df_dict.values):
+                ws_dict.set_row(3 + r_idx, 20)
+                for c_idx, val in enumerate(row):
+                    if c_idx == 0:
+                        ws_dict.write(3 + r_idx, c_idx, val, center_format)
+                    else:
+                        ws_dict.write(3 + r_idx, c_idx, val, cell_format)
+                        
+            ws_dict.set_column(0, 0, 30)
+            ws_dict.set_column(1, 1, 80)
+            
+        log_success(f"모든 분석 결과가 프리미엄 디자인이 적용된 다중 시트 엑셀 파일 '{output_filename}'에 저장되었습니다.")
+    except Exception as e:
+        log_error(f"엑셀 저장 중 오류가 발생했습니다: {e}")
+
+def get_toss_symbol(target_ticker):
+    """
+    yfinance 티커 코드를 토스증권 API 종목 심볼 규격으로 변환합니다.
+    - 예: '005930.KS' -> '005930'
+    - 예: 'AAPL' -> 'AAPL'
+    """
+    if '.' in target_ticker:
+        return target_ticker.split('.')[0]
+    return target_ticker
+
+def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None):
+    """
+    Chandelier Exit (ATR 기반 트레일링 스톱) 조건 만족 여부를 검증합니다.
+    매도조건: 현재가 < 최고가 - (3 * ATR(14))
+    """
+    try:
+        df_ticker = None
+        if data_ohlcv is not None:
+            # MultiIndex 컬럼 여부에 따라 안전한 종목 분리 추출
+            if isinstance(data_ohlcv.columns, pd.MultiIndex):
+                if ticker in data_ohlcv.columns.levels[0]:
+                    df_ticker = data_ohlcv[ticker].dropna()
+            else:
+                df_ticker = data_ohlcv.dropna()
+                
+        if df_ticker is None or len(df_ticker) < 30:
+            # 데이터가 유니버스에 없거나 부족할 때 yfinance로 직접 개별 다운로드
+            df_ticker = yf.download(ticker, period='2mo', progress=False).dropna()
+            
+        if df_ticker.empty or len(df_ticker) < 15:
+            return False, 0.0
+            
+        # ATR(14) 연산 호출
+        atr = AlphaFactory.alpha_atr(df_ticker, period=14)
+        stop_price = highest_price - (3.0 * atr)
+        is_stop_hit = current_price < stop_price
+        return is_stop_hit, stop_price
+    except Exception as e:
+        log_warn(f"[{ticker}] Chandelier Exit 계산 실패: {e}")
+        return False, 0.0
+
 if __name__ == "__main__":
+    print_banner()
+    
+    # CLI 인자 파싱
+    parser = argparse.ArgumentParser(description="김민겸 전략 기반 글로벌 퀀트 분석기 (토스증권 API 연동)")
+    parser.add_argument('--capital', type=float, default=10000000, help="투자 자본금 (기본값: 10,000,000 KRW, 토스 연동 시 자동 갱신)")
+    parser.add_argument('--output', type=str, default=None, help="결과 엑셀 파일 저장 경로 (생략 시 다이얼로그 또는 기본 경로)")
+    parser.add_argument('--no-cache', action='store_true', help="캐시를 사용하지 않고 새로 고침")
+    parser.add_argument('--test', action='store_true', help="테스트용 소형 유니버스(11개 종목)로 실행")
+    parser.add_argument('--execute', action='store_true', help="실제 토스증권 API를 호출하여 매매 주문을 실행")
+    args_cli = parser.parse_args()
+    
+    log_info("퀀트 분석을 시작합니다...")
+    
+    # .env 로드 및 TOSS API 클라이언트 초기화
+    load_dotenv()
+    toss_client_id = os.environ.get("TOSS_CLIENT_ID")
+    toss_client_secret = os.environ.get("TOSS_CLIENT_SECRET")
+    toss_base_url = os.environ.get("TOSS_BASE_URL", "https://openapi.tossinvest.com")
+    
+    toss_client = None
+    if toss_client_id and toss_client_secret and toss_client_id != "your_client_id_here":
+        try:
+            from toss_api import TossinvestClient
+            toss_client = TossinvestClient(toss_client_id, toss_client_secret, toss_base_url)
+            log_success("토스증권 API 인증 정보 로드 완료! (자동 연동 시작)")
+        except Exception as e:
+            log_error(f"토스증권 API 연동 모듈 초기화 실패: {e}")
+            toss_client = None
+            
     rates, sp500, vix = fetch_market_data()
     
     if rates is not None and not rates.empty:
@@ -361,92 +730,548 @@ if __name__ == "__main__":
         # 휴장일 차이로 인해 발생한 결측치(NaN)를 이전 영업일 데이터로 채우기
         market_df.ffill(inplace=True)
         
-        # 시장 국면 판단 (전체 데이터에 'Regime' 컬럼 추가됨)
+        # 시장 국면 판단
         current_regime = classify_market_regime(market_df)
         
-        # 최근 5일 데이터 출력
-        print("=== 병합된 시장 데이터 및 국면 (최근 5일) ===")
-        print(market_df.tail(), "\n")
+        print("\n" + "="*60)
+        log_success(f"현재 시장의 국면은: {Colors.BOLD}{current_regime}{Colors.RESET} 입니다.")
+        print("="*60 + "\n")
         
-        print(f"\n========================================")
-        print(f"현재 시장의 계절은: {current_regime} 입니다.")
-        print(f"========================================\n")
+        # 캐시 로드
+        cache = load_financials_cache() if not args_cli.no_cache else {}
         
-        # 백테스트 통계 출력
-        print("=== 과거 4계절 발생 일수 통계 ===")
-        print(market_df['Regime'].value_counts().to_string())
-        
-        # 각 국면별 S&P 500 평균 일일 수익률 계산 (백테스트 결과)
-        market_df['Next_Day_Return'] = market_df['S&P500_Close'].pct_change().shift(-1) * 100
-        print("\n=== 4계절별 S&P 500 평균 일일 수익률 (%) ===")
-        regime_returns = market_df.groupby('Regime')['Next_Day_Return'].mean()
-        print(regime_returns.round(3).to_string())
-        
-        # [추가] 최근 1년 데이터에 대한 통계 (변화 확인용)
-        print("\n\n=== [참고] 최근 1년 4계절 발생 일수 통계 ===")
-        recent_market_df = market_df.loc[market_df.index >= market_df.index.max() - pd.Timedelta(days=365)] # 최근 365일 데이터 필터링
-        if not recent_market_df.empty:
-            print(recent_market_df['Regime'].value_counts().to_string())
-            
-            print("\n=== [참고] 최근 1년 4계절별 S&P 500 평균 일일 수익률 (%) ===")
-            recent_regime_returns = recent_market_df.groupby('Regime')['Next_Day_Return'].mean()
-            print(recent_regime_returns.round(3).to_string())
+        # --- 알파 엔진 실행 ---
+        if args_cli.test:
+            alpha_results = get_neutralized_alpha(is_test=True, cache=cache)
         else:
-            print("최근 1년 데이터가 충분하지 않아 통계를 계산할 수 없습니다.")
-        
-        # --- 유니버스 종목 분석 (현재 국면이 무엇이든 테스트를 위해 실행) ---
-        # analyze_stock_universe 함수는 이제 get_neutralized_alpha에 통합되므로 호출하지 않음
-        
-        # --- [3단계] 업종 중립화 알파 엔진 실행 ---
-        # 미국(S&P500)과 한국(KRX) 시장을 각각 분석하여 하나로 합칩니다.
-        print("\n[글로벌 퀀트 분석] 미국 시장 분석을 시작합니다...")
-        alpha_results_sp500 = get_neutralized_alpha(market='SP500')
-        print("\n[글로벌 퀀트 분석] 한국 시장 분석을 시작합니다...")
-        alpha_results_krx = get_neutralized_alpha(market='KRX')
-        
-        alpha_results = pd.concat([alpha_results_sp500, alpha_results_krx]).sort_values(by='Pure_Alpha(%)', ascending=False)
-        print("\n=== 31개 알파 기반 종목별 순수 실력(Pure Alpha) 순위 (상위 15개) ===")
-        # 터미널 창이너무 길어지지 않게 15개만 출력
-        # alpha_2(20일 수익률) 컬럼을 보기 좋게 Return_20d(%) 이름으로 바꿔서 출력하도록 수정
-        print(alpha_results.rename(columns={'alpha_2': 'Return_20d(%)'})[['Industry', 'Return_20d(%)', 'Pure_Alpha(%)']].head(15).round(2).to_string())
-        # --- [4단계] 포트폴리오 구성 및 비중 배분 ---
-        final_portfolio = generate_portfolio(alpha_results, capital=10000000) # 1,000만원 기준
-        if not final_portfolio.empty:
-            # 최종 선정된 종목들에 대해서만 AI 뉴스 심리 점수(Alpha 32) 계산
-            print("\n=== [Alpha 32] 최종 포트폴리오 종목 AI 뉴스 감성 분석 중 ===")
-            final_portfolio['AI_News_Score'] = [get_news_sentiment(ticker) for ticker in final_portfolio.index]
+            log_info("미국 시장(S&P 500) 분석을 시작합니다...")
+            alpha_results_sp500 = get_neutralized_alpha(market='SP500', cache=cache)
+            log_info("한국 시장(KRX) 분석을 시작합니다...")
+            alpha_results_krx = get_neutralized_alpha(market='KRX', cache=cache)
             
-            # [추가] 뉴스 심리가 부정적(-점수)인 종목은 투자 비중을 절반으로 깎음 (패널티 적용)
-            for ticker in final_portfolio.index:
-                if final_portfolio.at[ticker, 'AI_News_Score'] < 0:
-                    final_portfolio.at[ticker, 'Weight(%)'] /= 2
+            results_to_concat = []
+            if not alpha_results_sp500.empty:
+                results_to_concat.append(alpha_results_sp500)
+            if not alpha_results_krx.empty:
+                results_to_concat.append(alpha_results_krx)
+            
+            if results_to_concat:
+                alpha_results = pd.concat(results_to_concat).sort_values(by='Pure_Alpha(%)', ascending=False)
+            else:
+                alpha_results = pd.DataFrame()
+            
+        if not alpha_results.empty:
+            # 실시간 환율 조회 (미국 주식 및 달러 예수금 계산용)
+            usd_krw = 1350.0
+            if toss_client:
+                try:
+                    usd_krw = toss_client.get_exchange_rate(base="USD", quote="KRW")
+                    log_info(f"실시간 적용 환율: 1 USD = {usd_krw:,.2f} KRW")
+                except Exception:
+                    pass
+
+            # --- 투자 자본금(Capital) 및 통화별 예수금 동적 연동 ---
+            capital_amount = args_cli.capital
+            cash_balance_krw = 0.0
+            cash_balance_usd = 0.0
+            
+            if toss_client:
+                log_info("토스증권 계좌에서 실제 예수금(원화 및 달러)을 가져옵니다...")
+                try:
+                    cash_balance_krw = toss_client.get_buying_power(currency="KRW")
+                    log_success(f"실적용 계좌 원화 예수금: {cash_balance_krw:,.0f} KRW")
+                except Exception as e:
+                    log_warn(f"원화 예수금 로드 실패: {e}.")
+                    cash_balance_krw = capital_amount * 0.5
                     
-            # 비중이 깎였으므로 전체 합이 100%가 되도록 비중 재조정 및 투자금 재계산
-            final_portfolio['Weight(%)'] = (final_portfolio['Weight(%)'] / final_portfolio['Weight(%)'].sum()) * 100
-            final_portfolio['Invest_Amount(KRW)'] = 10000000 * (final_portfolio['Weight(%)'] / 100)
+                try:
+                    cash_balance_usd = toss_client.get_buying_power(currency="USD")
+                    log_success(f"실적용 계좌 달러 예수금: $ {cash_balance_usd:,.2f} USD")
+                except Exception as e:
+                    log_warn(f"달러 예수금 로드 실패: {e}.")
+                    cash_balance_usd = (capital_amount * 0.5) / usd_krw
+            else:
+                # 시뮬레이터 모드: 원화 자본금의 절반을 원화, 절반을 달러로 가상 세팅
+                cash_balance_krw = capital_amount * 0.5
+                cash_balance_usd = (capital_amount * 0.5) / usd_krw
+                
+            # 전체 가용 자본금(원화 환산 총액) 계산
+            capital_amount = cash_balance_krw + (cash_balance_usd * usd_krw)
             
-            print("\n" + "="*50)
-            print("🚀 김민겸 전략 기반 최종 포트폴리오 제안 (자본금 1,000만원)")
-            print("="*50)
+            # --- 미국 및 국내 주식 50/50 듀얼 포트폴리오 생성 ---
+            us_capital = cash_balance_usd * usd_krw
+            kr_capital = cash_balance_krw
             
-            # 컬럼 순서 및 출력 포맷 정리
-            output_cols = ['Industry', 'Pure_Alpha(%)', 'AI_News_Score', 'Weight(%)', 'Invest_Amount(KRW)']
-            print(final_portfolio[output_cols].round(2).to_string())
+            if args_cli.test:
+                # 테스트 유니버스 분류 (XOM, CVX, COP를 가상 한국주식으로 매핑)
+                alpha_results_us = alpha_results[~alpha_results.index.isin(['XOM', 'CVX', 'COP'])]
+                alpha_results_kr = alpha_results[alpha_results.index.isin(['XOM', 'CVX', 'COP'])]
+            else:
+                alpha_results_us = alpha_results_sp500
+                alpha_results_kr = alpha_results_krx
+
+            log_info(f"통화별 자본금 설정: 미국 주식(USD계좌 - {cash_balance_usd:,.2f} USD = {us_capital:,.0f} KRW) / 국내 주식(KRW계좌 - {cash_balance_krw:,.0f} KRW)")
             
-            # 윈도우(GUI) 탐색기를 띄워 저장할 폴더 및 파일명 설정
-            root = tk.Tk()
-            root.withdraw() # 메인 창 숨기기
-            root.attributes('-topmost', True) # 창을 항상 위로 유지
+            portfolio_us = generate_portfolio(alpha_results_us, capital=us_capital)
+            portfolio_kr = generate_portfolio(alpha_results_kr, capital=kr_capital)
             
-            print("\n💾 엑셀 파일을 저장할 위치를 선택해 주세요...")
-            output_filename = filedialog.asksaveasfilename(
-                initialfile='stock_analysis_results.xlsx',
-                title="분석 결과를 저장할 엑셀 파일 위치 선택",
-                defaultextension=".xlsx",
-                filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
-            )
+            final_portfolio = pd.concat([portfolio_us, portfolio_kr])
             
-            if output_filename:
+            if not final_portfolio.empty:
+                # 최종 선정된 종목들에 대해서만 AI 뉴스 심리 점수(Alpha 32) 계산
+                log_info("최종 듀얼 포트폴리오 종목 AI 뉴스 감성 분석 중...")
+                final_portfolio['AI_News_Score'] = [get_news_sentiment(ticker) for ticker in final_portfolio.index]
+                
+                # 뉴스 심리가 부정적(-점수)인 종목은 투자 비중을 절반으로 깎음 (패널티 적용)
+                for ticker in final_portfolio.index:
+                    if final_portfolio.at[ticker, 'AI_News_Score'] < 0:
+                        log_warn(f"[{ticker}] 뉴스 감성 점수가 부정적({final_portfolio.at[ticker, 'AI_News_Score']:.2f})이므로 비중을 50% 감축합니다.")
+                        final_portfolio.at[ticker, 'Weight(%)'] /= 2
+                        
+                # 비중 재조정 및 투자금 재계산 (미국 및 국내 자산군별로 각각 50% 내에서 정밀 스케일링)
+                if args_cli.test:
+                    us_mask = ~final_portfolio.index.isin(['XOM', 'CVX', 'COP'])
+                    kr_mask = final_portfolio.index.isin(['XOM', 'CVX', 'COP'])
+                else:
+                    us_mask = final_portfolio['Market'] == 'SP500'
+                    kr_mask = final_portfolio['Market'] == 'KRX'
+                    
+                if final_portfolio[us_mask].shape[0] > 0:
+                    final_portfolio.loc[us_mask, 'Weight(%)'] = (final_portfolio.loc[us_mask, 'Weight(%)'] / final_portfolio.loc[us_mask, 'Weight(%)'].sum()) * 50.0
+                if final_portfolio[kr_mask].shape[0] > 0:
+                    final_portfolio.loc[kr_mask, 'Weight(%)'] = (final_portfolio.loc[kr_mask, 'Weight(%)'] / final_portfolio.loc[kr_mask, 'Weight(%)'].sum()) * 50.0
+                    
+                final_portfolio['Invest_Amount(KRW)'] = capital_amount * (final_portfolio['Weight(%)'] / 100)
+                
+                print("\n" + "="*60)
+                log_success(f"🚀 [최종 타겟 듀얼 포트폴리오 (50/50)] 제안 (총 자본금: {capital_amount:,.0f} KRW)")
+                print("="*60)
+                output_cols = ['Market', 'Industry', 'Pure_Alpha(%)', 'AI_News_Score', 'Weight(%)', 'Invest_Amount(KRW)']
+                print(final_portfolio[output_cols].round(2).to_string())
+                print("="*60 + "\n")
+                
+                # --- 리밸런싱 주문 수량 계산 및 TOSS API 연동 (느슨한 로테이션 + 샹들리에 에그짓) ---
+                df_rebal = pd.DataFrame()
+                toss_holdings = []
+
+                if toss_client:
+                    log_info("토스증권 계좌의 현재 보유 주식 잔고를 불러옵니다...")
+                    try:
+                        toss_holdings = toss_client.get_holdings()
+                        log_success(f"보유 잔고 조회 완료! (보유 종목 수: {len(toss_holdings)}개)")
+                    except Exception as e:
+                        log_error(f"보유 잔고를 불러오지 못했습니다: {e}")
+                else:
+                    # 시뮬레이터 모드: 로컬 파일에서 가상 보유 주식 정보 불러오기
+                    log_info("시뮬레이터 모드: 로컬 포트폴리오 상태에서 가상 보유 종목 정보를 불러옵니다...")
+                    state = load_portfolio_state()
+                    toss_holdings = []
+                    for sym, info in state.items():
+                        # 원래 화폐 현재가는 yfinance에서 가져옴
+                        ticker_name = sym
+                        for t in alpha_results.index:
+                            if get_toss_symbol(t) == sym:
+                                ticker_name = t
+                                break
+                        price_original = 0.0
+                        try:
+                            ticker_df = yf.download(ticker_name, period='1d', progress=False)
+                            if not ticker_df.empty:
+                                price_original = float(ticker_df['Close'].iloc[-1])
+                        except Exception:
+                            pass
+                        
+                        is_us = not (ticker_name.endswith('.KS') or ticker_name.endswith('.KQ'))
+                        toss_holdings.append({
+                            "symbol": sym,
+                            "quantity": info.get("purchase_qty", 0.0),
+                            "lastPrice": price_original,
+                            "currency": "USD" if is_us else "KRW"
+                        })
+                        
+                # TOSS 보유 종목 사전(Dict) 매핑
+                holdings_dict = {}
+                for item in toss_holdings:
+                    sym = item.get("symbol")
+                    qty = float(item.get("quantity", 0.0))
+                    price = float(item.get("lastPrice", 0.0))
+                    currency = item.get("currency", "KRW")
+                    
+                    price_krw = price * usd_krw if currency == "USD" else price
+                    current_val_krw = qty * price_krw
+                    
+                    holdings_dict[sym] = {
+                        "qty": qty,
+                        "price_krw": price_krw,
+                        "price_original": price,
+                        "currency": currency,
+                        "val_krw": current_val_krw
+                    }
+                    
+                # 로컬 포트폴리오 상태 동기화 (최고가 갱신 등)
+                portfolio_state = sync_portfolio_state(holdings_dict)
+                
+                # 리밸런싱 조정 테이블 계산
+                rebal_data = []
+                
+                # WINTER 국면 여부 확인 (WINTER 국면일 경우 전량 매도 청산)
+                is_winter = "WINTER" in current_regime
+                
+                # 미국 및 국내 종목별 랭킹 딕셔너리 개별 작성
+                us_rank_dict = {ticker: idx + 1 for idx, ticker in enumerate(alpha_results_us.index)}
+                kr_rank_dict = {ticker: idx + 1 for idx, ticker in enumerate(alpha_results_kr.index)}
+                
+                # 보관할 종목 목록 (미국/한국 개별 추적)
+                kept_us_symbols = []
+                kept_kr_symbols = []
+                
+                data_ohlcv = locals().get("data_ohlcv", None)
+                
+                # 1단계: 기존 보유 종목 청산 검토
+                for sym, curr in holdings_dict.items():
+                    if curr["qty"] <= 0:
+                        continue
+                        
+                    ticker_name = None
+                    is_us_stock = True
+                    
+                    # 미국 유니버스 및 국내 유니버스 전체 매핑 확인
+                    for t in alpha_results.index:
+                        if get_toss_symbol(t) == sym:
+                            ticker_name = t
+                            if args_cli.test:
+                                is_us_stock = t not in ['XOM', 'CVX', 'COP']
+                            else:
+                                is_us_stock = t.endswith('.KS') == False and t.endswith('.KQ') == False
+                            break
+                            
+                    if not ticker_name:
+                        # 유니버스 외 보유 주식 -> 전량 매도
+                        rebal_data.append({
+                            "Ticker": f"{sym} (유니버스 외)",
+                            "Toss_Symbol": sym,
+                            "Action": "SELL",
+                            "Reason": "유니버스 제외 대상 즉시 청산",
+                            "Target_Weight(%)": 0.0,
+                            "Target_Value(KRW)": 0.0,
+                            "Current_Qty": curr["qty"],
+                            "Current_Price": curr["price_original"],
+                            "Currency": curr["currency"],
+                            "Current_Value(KRW)": curr["val_krw"],
+                            "Target_Qty": 0.0,
+                            "Diff_Qty": -curr["qty"],
+                            "Diff_Value(KRW)": -curr["val_krw"]
+                        })
+                        continue
+                        
+                    if is_winter:
+                        # 겨울 국면일 경우 무조건 전량 현금화
+                        rebal_data.append({
+                            "Ticker": ticker_name,
+                            "Toss_Symbol": sym,
+                            "Action": "SELL",
+                            "Reason": "WINTER 국면 전환 전량 청산 (Cash is King)",
+                            "Target_Weight(%)": 0.0,
+                            "Target_Value(KRW)": 0.0,
+                            "Current_Qty": curr["qty"],
+                            "Current_Price": curr["price_original"],
+                            "Currency": curr["currency"],
+                            "Current_Value(KRW)": curr["val_krw"],
+                            "Target_Qty": 0.0,
+                            "Diff_Qty": -curr["qty"],
+                            "Diff_Value(KRW)": -curr["val_krw"]
+                        })
+                        continue
+                        
+                    # Chandelier Exit 검증
+                    state_info = portfolio_state.get(sym, {})
+                    highest_price = state_info.get("highest_price", curr["price_original"])
+                    
+                    is_stop_hit, stop_price = check_chandelier_exit(ticker_name, curr["price_original"], highest_price, data_ohlcv)
+                    
+                    if is_stop_hit:
+                        rebal_data.append({
+                            "Ticker": ticker_name,
+                            "Toss_Symbol": sym,
+                            "Action": "SELL",
+                            "Reason": f"샹들리에 추적손절 청산 (손절가: {stop_price:.2f}, 최고가: {highest_price:.2f})",
+                            "Target_Weight(%)": 0.0,
+                            "Target_Value(KRW)": 0.0,
+                            "Current_Qty": curr["qty"],
+                            "Current_Price": curr["price_original"],
+                            "Currency": curr["currency"],
+                            "Current_Value(KRW)": curr["val_krw"],
+                            "Target_Qty": 0.0,
+                            "Diff_Qty": -curr["qty"],
+                            "Diff_Value(KRW)": -curr["val_krw"]
+                        })
+                        continue
+                        
+                    # 느슨한 로테이션 검증
+                    rank = us_rank_dict.get(ticker_name, 999) if is_us_stock else kr_rank_dict.get(ticker_name, 999)
+                    if rank > 10:
+                        rebal_data.append({
+                            "Ticker": ticker_name,
+                            "Toss_Symbol": sym,
+                            "Action": "SELL",
+                            "Reason": f"느슨한 로테이션 청산 (현재 풀 내 순위: {rank}위, TOP 10 밖으로 밀림)",
+                            "Target_Weight(%)": 0.0,
+                            "Target_Value(KRW)": 0.0,
+                            "Current_Qty": curr["qty"],
+                            "Current_Price": curr["price_original"],
+                            "Currency": curr["currency"],
+                            "Current_Value(KRW)": curr["val_krw"],
+                            "Target_Qty": 0.0,
+                            "Diff_Qty": -curr["qty"],
+                            "Diff_Value(KRW)": -curr["val_krw"]
+                        })
+                        continue
+                        
+                    # 생존한 종목은 보유 유지
+                    if is_us_stock:
+                        kept_us_symbols.append(sym)
+                    else:
+                        kept_kr_symbols.append(sym)
+                        
+                    rebal_data.append({
+                        "Ticker": ticker_name,
+                        "Toss_Symbol": sym,
+                        "Action": "HOLD",
+                        "Reason": f"보유 유지 (현재 순위: {rank}위, 최고가: {highest_price:.2f})",
+                        "Target_Weight(%)": 10.0,
+                        "Target_Value(KRW)": curr["val_krw"],
+                        "Current_Qty": curr["qty"],
+                        "Current_Price": curr["price_original"],
+                        "Currency": curr["currency"],
+                        "Current_Value(KRW)": curr["val_krw"],
+                        "Target_Qty": curr["qty"],
+                        "Diff_Qty": 0.0,
+                        "Diff_Value(KRW)": 0.0
+                    })
+                    
+                # --- 통화별 실질 자금/예수금 한도 분배 ---
+                # 1. 미국 주식 (USD 풀)
+                current_us_value_usd = sum(item["qty"] * item["price_original"] for sym, item in holdings_dict.items() if item["currency"] == "USD")
+                total_us_assets_usd = cash_balance_usd + current_us_value_usd
+                target_val_per_stock_usd = total_us_assets_usd / 5.0
+                
+                # 2. 국내 주식 (KRW 풀)
+                current_kr_value_krw = sum(item["qty"] * item["price_original"] for sym, item in holdings_dict.items() if item["currency"] == "KRW")
+                total_kr_assets_krw = cash_balance_krw + current_kr_value_krw
+                target_val_per_stock_krw = total_kr_assets_krw / 5.0
+                
+                log_info(f"📊 [통화별 실질 자금/예수금 한도 분배]")
+                log_info(f"  * 미국 주식 (USD): 예수금 ${cash_balance_usd:,.2f} | 주식 ${current_us_value_usd:,.2f} | 총자산 ${total_us_assets_usd:,.2f} (종목당 목표 ${target_val_per_stock_usd:,.2f})")
+                log_info(f"  * 국내 주식 (KRW): 예수금 {cash_balance_krw:,.0f}원 | 주식 {current_kr_value_krw:,.0f}원 | 총자산 {total_kr_assets_krw:,.0f}원 (종목당 목표 {target_val_per_stock_krw:,.0f}원)")
+                
+                # 2단계: 신규 매수 편입 종목 선정 (미국/한국 시장별로 각각 독립적으로 슬롯 충전)
+                if not is_winter:
+                    # 미국 주식 충전 (가용 슬롯: 5 - kept_us_symbols)
+                    us_slots = 5 - len(kept_us_symbols)
+                    if us_slots > 0:
+                        log_info(f"[미국 포트폴리오] 신규 편입 가능 슬롯: {us_slots}개")
+                        top_picks_us = alpha_results_us.head(5).index
+                        buy_candidates_us = [t for t in top_picks_us if get_toss_symbol(t) not in kept_us_symbols]
+                        to_buy_us = buy_candidates_us[:us_slots]
+                        
+                        # 실제 달러 예수금(cash_balance_usd) 범위 내에서만 매수 집행
+                        per_stock_budget_usd = cash_balance_usd / us_slots if us_slots > 0 else 0.0
+                        
+                        for ticker in to_buy_us:
+                            t_sym = get_toss_symbol(ticker)
+                            price_original = 0.0
+                            price_krw = 0.0
+                            try:
+                                ticker_df = yf.download(ticker, period='1d', progress=False)
+                                if not ticker_df.empty:
+                                    price_original = float(ticker_df['Close'].iloc[-1])
+                                    price_krw = price_original * usd_krw
+                            except Exception:
+                                pass
+                                
+                            if price_original > 0.0 and per_stock_budget_usd > 0.0:
+                                target_qty = int(per_stock_budget_usd / price_original)
+                                if target_qty > 0:
+                                    rebal_data.append({
+                                        "Ticker": ticker,
+                                        "Toss_Symbol": t_sym,
+                                        "Action": "BUY",
+                                        "Reason": f"미국 신규 진입 (달러 예수금 매수, 랭킹 {us_rank_dict.get(ticker, 0)}위)",
+                                        "Target_Weight(%)": 10.0,
+                                        "Target_Value(KRW)": per_stock_budget_usd * usd_krw,
+                                        "Current_Qty": 0.0,
+                                        "Current_Price": price_original,
+                                        "Currency": "USD",
+                                        "Current_Value(KRW)": 0.0,
+                                        "Target_Qty": target_qty,
+                                        "Diff_Qty": target_qty,
+                                        "Diff_Value(KRW)": target_qty * price_original * usd_krw
+                                    })
+                                    
+                    # 국내 주식 충전 (가용 슬롯: 5 - kept_kr_symbols)
+                    kr_slots = 5 - len(kept_kr_symbols)
+                    if kr_slots > 0:
+                        log_info(f"[국내 포트폴리오] 신규 편입 가능 슬롯: {kr_slots}개")
+                        top_picks_kr = alpha_results_kr.head(5).index
+                        buy_candidates_kr = [t for t in top_picks_kr if get_toss_symbol(t) not in kept_kr_symbols]
+                        to_buy_kr = buy_candidates_kr[:kr_slots]
+                        
+                        # 실제 원화 예수금(cash_balance_krw) 범위 내에서만 매수 집행
+                        per_stock_budget_kr = cash_balance_krw / kr_slots if kr_slots > 0 else 0.0
+                        
+                        for ticker in to_buy_kr:
+                            t_sym = get_toss_symbol(ticker)
+                            price_original = 0.0
+                            price_krw = 0.0
+                            try:
+                                ticker_df = yf.download(ticker, period='1d', progress=False)
+                                if not ticker_df.empty:
+                                    price_original = float(ticker_df['Close'].iloc[-1])
+                                    price_krw = price_original
+                            except Exception:
+                                pass
+                                
+                            if price_original > 0.0 and per_stock_budget_kr > 0.0:
+                                target_qty = int(per_stock_budget_kr / price_original)
+                                if target_qty > 0:
+                                    rebal_data.append({
+                                        "Ticker": ticker,
+                                        "Toss_Symbol": t_sym,
+                                        "Action": "BUY",
+                                        "Reason": f"국내 신규 진입 (원화 예수금 매수, 랭킹 {kr_rank_dict.get(ticker, 0)}위)",
+                                        "Target_Weight(%)": 10.0,
+                                        "Target_Value(KRW)": per_stock_budget_kr,
+                                        "Current_Qty": 0.0,
+                                        "Current_Price": price_original,
+                                        "Currency": "KRW",
+                                        "Current_Value(KRW)": 0.0,
+                                        "Target_Qty": target_qty,
+                                        "Diff_Qty": target_qty,
+                                        "Diff_Value(KRW)": target_qty * price_original
+                                    })
+                                    
+                if rebal_data:
+                    df_rebal = pd.DataFrame(rebal_data).set_index("Ticker")
+                    
+                    # 리밸런싱 조정 테이블 출력
+                    print("\n" + "="*60)
+                    log_success("🔄 듀얼 포트폴리오 (통화별 한도 격리) 리밸런싱 주문 조정 계획안")
+                    print("="*60)
+                    print_df = df_rebal[['Toss_Symbol', 'Action', 'Current_Qty', 'Target_Qty', 'Diff_Qty', 'Diff_Value(KRW)', 'Reason']].copy()
+                    print_df['Diff_Value(KRW)'] = print_df['Diff_Value(KRW)'].map(lambda x: f"{x:,.0f} KRW")
+                    print(print_df.to_string())
+                    print("="*60 + "\n")
+                    
+                    # 실제 TOSS 주문 실행
+                    if args_cli.execute:
+                        if not toss_client:
+                            log_error("TOSS API 인증 정보가 구성되지 않아 실제 주문을 보낼 수 없습니다. .env 파일을 세팅해 주세요.")
+                        else:
+                            log_warn("🚨 토스증권 API를 통해 계좌 실주문을 전송합니다.")
+                            
+                            # 0. 기존 미체결/예약 주문 취소
+                            log_info("0단계: 기존 대기 중인 예약/미체결 주문 취소 검토 중...")
+                            try:
+                                pending_orders = toss_client.get_orders(status="PENDING")
+                                if pending_orders:
+                                    log_info(f"조회된 대기 주문 수: {len(pending_orders)}개")
+                                    # 리밸런싱 대상이거나 분석 대상 유니버스에 속한 종목의 대기 주문을 취소합니다.
+                                    symbols_to_cancel = set(df_rebal['Toss_Symbol'].tolist())
+                                    cancelled_count = 0
+                                    for p_ord in pending_orders:
+                                        p_symbol = p_ord.get("symbol")
+                                        p_order_id = p_ord.get("orderId")
+                                        if p_symbol in symbols_to_cancel or any(get_toss_symbol(t) == p_symbol for t in alpha_results.index):
+                                            log_warn(f"[{p_symbol}] 대기 중인 기존 예약 주문(ID: {p_order_id}) 취소 요청 중...")
+                                            toss_client.cancel_order(p_order_id)
+                                            cancelled_count += 1
+                                    if cancelled_count > 0:
+                                        log_success(f"총 {cancelled_count}개의 대기 주문을 취소 완료했습니다.")
+                                        time.sleep(1) # 취소 처리 지연 대기
+                                    else:
+                                        log_info("취소 대상인 대기 주문이 없습니다.")
+                                else:
+                                    log_info("대기 중인 예약/미체결 주문이 없습니다.")
+                            except Exception as e:
+                                log_warn(f"기존 대기 주문 자동 취소 처리 중 오류 발생 (건너뜀): {e}")
+
+                            
+                            # 1. 매도 주문 실행 (현금 예수금 확보)
+                            log_info("1단계: 매도(SELL) 주문 전송 중...")
+                            sell_orders = df_rebal[df_rebal['Diff_Qty'] < 0]
+                            for t_name, row in sell_orders.iterrows():
+                                sym = row['Toss_Symbol']
+                                qty = int(abs(row['Diff_Qty']))
+                                if qty <= 0: continue
+                                log_info(f"[{t_name}] 매도 주문 전송: {qty}주 (사유: {row['Reason']})")
+                                try:
+                                    res = toss_client.create_order(symbol=sym, side="SELL", quantity=qty, order_type="MARKET")
+                                    log_success(f"[{t_name}] 매도 완료! (주문번호: {res.get('orderId')})")
+                                except Exception as e:
+                                    log_error(f"[{t_name}] 매도 실패: {e}")
+                                    
+                            # 2. 매수 주문 실행
+                            log_info("2단계: 매수(BUY) 주문 전송 중...")
+                            buy_orders = df_rebal[df_rebal['Diff_Qty'] > 0]
+                            for t_name, row in buy_orders.iterrows():
+                                sym = row['Toss_Symbol']
+                                qty = int(row['Diff_Qty'])
+                                if qty <= 0: continue
+                                log_info(f"[{t_name}] 매수 주문 전송: {qty}주 (사유: {row['Reason']})")
+                                try:
+                                    res = toss_client.create_order(symbol=sym, side="BUY", quantity=qty, order_type="MARKET")
+                                    log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
+                                except Exception as e:
+                                    log_error(f"[{t_name}] 매수 실패: {e}")
+                                    
+                            log_success("포트폴리오 리밸런싱 주문 처리가 마무리되었습니다.")
+                    else:
+                        # 시뮬레이터 모드 가상 주문 업데이트
+                        if not toss_client:
+                            log_info("시뮬레이터 모드: 가상 포트폴리오 로컬 상태(.portfolio_state.json)를 업데이트합니다...")
+                            new_state = {}
+                            for ticker, row in df_rebal.iterrows():
+                                act = row['Action']
+                                sym = row['Toss_Symbol']
+                                if act == "HOLD":
+                                    new_state[sym] = portfolio_state.get(sym, {})
+                                    new_state[sym]["purchase_qty"] = row['Target_Qty']
+                                elif act == "BUY":
+                                    new_state[sym] = {
+                                        "purchase_date": time.strftime('%Y-%m-%d %H:%M:%S'),
+                                        "purchase_price": row['Current_Price'],
+                                        "highest_price": row['Current_Price'],
+                                        "purchase_qty": row['Target_Qty']
+                                    }
+                            save_portfolio_state(new_state)
+                            log_success("가상 포트폴리오 로컬 상태 파일이 갱신되었습니다.")
+                        else:
+                            log_info("참고: 실계좌로 리밸런싱 주문을 접수하려면 '--execute' 인자를 추가하세요.")
+                            log_info("예: python quant_analyzer.py --execute")
+                
+                # 윈도우(GUI) 탐색기를 띄워 저장할 폴더 및 파일명 설정
+                output_filename = args_cli.output
+                if not output_filename:
+                    try:
+                        root = tk.Tk()
+                        root.withdraw() # 메인 창 숨기기
+                        root.attributes('-topmost', True) # 창을 항상 위로 유지
+                        
+                        log_info("엑셀 파일을 저장할 위치를 선택해 주세요...")
+                        output_filename = filedialog.asksaveasfilename(
+                            initialfile='stock_analysis_results.xlsx',
+                            title="분석 결과를 저장할 엑셀 파일 위치 선택",
+                            defaultextension=".xlsx",
+                            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
+                        )
+                    except Exception as ex:
+                        log_warn(f"GUI 환경 탐색기를 실행할 수 없으므로 기본 파일명으로 대체합니다. ({ex})")
+                        output_filename = 'stock_analysis_results.xlsx'
+                
+                if not output_filename:
+                    output_filename = 'stock_analysis_results.xlsx'
+                    log_warn(f"저장 위치가 선택되지 않아 기본 경로 및 파일명으로 지정합니다: {output_filename}")
+                
                 # 알파 지표 설명을 담은 데이터프레임 생성
                 alpha_descriptions = [
                     {"지표명": "alpha_1", "의미": "5일 수익률 (단기 모멘텀)"},
@@ -486,47 +1311,12 @@ if __name__ == "__main__":
                     {"지표명": "Pure_Alpha(%)", "의미": "Total_Score에서 업종 평균을 차감한 순수 종목 점수 (업종 거품 제거)"},
                 ]
                 df_alpha_dict = pd.DataFrame(alpha_descriptions)
-
-                # 사용자가 위치를 지정했다면 엑셀 파일 생성
-                with pd.ExcelWriter(output_filename, engine='xlsxwriter') as writer:
-                    df_market = market_df.copy()
-                    df_alpha_export = alpha_results.rename(columns={'alpha_2': 'Return_20d(%)'})
-                    df_portfolio = final_portfolio[output_cols].copy()
-                    
-                    # 1. 단일 시트('Analysis Summary')에 데이터 순차적으로 합쳐서 쓰기
-                    workbook = writer.book
-                    worksheet = workbook.add_worksheet('Analysis Summary')
-                    
-                    title_format = workbook.add_format({'bold': True, 'font_size': 12, 'font_color': 'blue'})
-                    header_format = workbook.add_format({'bold': True, 'bg_color': '#D9D9D9', 'border': 1, 'align': 'center'})
-                    
-                    # 중복 시트 생성(엑셀 파일 깨짐) 방지를 위한 수동 쓰기 함수
-                    def write_df_to_sheet(ws, df, start_row, title):
-                        ws.write(start_row, 0, title, title_format)
-                        start_row += 1
-                        
-                        df_write = df.copy()
-                        if isinstance(df_write.index, pd.DatetimeIndex):
-                            df_write.index = df_write.index.strftime('%Y-%m-%d')
-                        df_write = df_write.reset_index()
-                        df_write = df_write.fillna("") # 빈 값(NaN) 처리
-                        
-                        ws.write_row(start_row, 0, list(df_write.columns), header_format)
-                        for r_idx, row_data in enumerate(df_write.values.tolist()):
-                            ws.write_row(start_row + 1 + r_idx, 0, row_data)
-                            
-                        return start_row + 2 + len(df_write) # 다음 테이블을 위해 여백 추가
-                        
-                    current_row = 0
-                    current_row = write_df_to_sheet(worksheet, df_portfolio, current_row, "1. Final Portfolio (최종 포트폴리오)")
-                    current_row = write_df_to_sheet(worksheet, df_alpha_export, current_row, "2. Alpha Results (전체 종목 순수 실력 점수)")
-                    current_row = write_df_to_sheet(worksheet, df_market, current_row, "3. Market Data (시장 및 거시경제 지표)")
-                    current_row = write_df_to_sheet(worksheet, df_alpha_dict, current_row, "4. Alpha Indicators Dictionary (알파 지표 설명)")
-                    
-                    # 2. 열 너비 자동 조절
-                    worksheet.set_column(0, 0, 25) # A열 (Index) 간격 늘림
-                    worksheet.set_column(1, 40, 25) # ### 깨짐 방지를 위해 열 너비를 25로 넉넉하게 늘림
                 
-                print(f"\n✅ 성공! 모든 분석 결과가 '{output_filename}'의 단일 시트에 깔끔하게 합쳐져 저장되었습니다.")
+                # 프리미엄 엑셀 내보내기 호출
+                export_to_excel(output_filename, final_portfolio, alpha_results, market_df, df_alpha_dict, df_rebal)
             else:
-                print("\n❌ 파일 저장이 취소되었습니다.")
+                log_warn("최종 포트폴리오를 구성하지 못했습니다.")
+        else:
+            log_error("알파 계산 결과 데이터가 없습니다.")
+    else:
+        log_error("거시경제 데이터 수집 실패로 프로그램을 종료합니다.")

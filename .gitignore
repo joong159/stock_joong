@@ -1,0 +1,14 @@
+# Local Environment settings
+.env
+
+# Quant Cache files
+.financials_cache.json
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Distribution / Build
+build/
+dist/
+*.spec
