@@ -289,22 +289,13 @@ class LiveDashboardApp:
             self.manual_refresh()
             return
             
-        # 메인 GUI 스레드에서 파일 저장 대화상자 안전하게 띄우기
-        output_file = filedialog.asksaveasfilename(
-            initialfile='stock_analysis_results.xlsx',
-            title="분석 결과를 저장할 엑셀 파일 위치 선택",
-            defaultextension=".xlsx",
-            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
-        )
-        if not output_file:
-            self.manual_refresh()
-            return
-            
         def execute_backend():
+            temp_output = "temp_output.xlsx"
             try:
                 import subprocess
+                import shutil
                 # S&P500, KRX 분석 및 엑셀 출력을 포함한 파이썬 스크립트 백그라운드 호출
-                cmd = ["python", "quant_analyzer.py", "--output", output_file]
+                cmd = ["python", "quant_analyzer.py", "--output", temp_output]
                 if self.is_offline:
                     cmd.append("--test") # 오프라인 모드일 땐 가볍게 11개 대형주 테스트 유니버스로 실행
                     
@@ -312,15 +303,37 @@ class LiveDashboardApp:
                 
                 # 결과 출력 확인
                 if res.returncode == 0:
-                    self.root.after(0, lambda: messagebox.showinfo("분석 완료", "퀀트 리밸런싱 포트폴리오가 정상적으로 분석되어 엑셀 리포트가 생성되었습니다!\n자세한 매매 내용은 콘솔 출력창 및 엑셀 리포트를 확인해 주세요."))
+                    def ask_save():
+                        save_confirm = messagebox.askyesno("엑셀 보고서 저장", "퀀트 리밸런싱 분석 및 주문 전송이 성공적으로 완료되었습니다!\n분석 결과 엑셀 보고서 파일을 저장하시겠습니까?")
+                        if save_confirm:
+                            output_file = filedialog.asksaveasfilename(
+                                initialfile='stock_analysis_results.xlsx',
+                                title="분석 결과를 저장할 엑셀 파일 위치 선택",
+                                defaultextension=".xlsx",
+                                filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
+                            )
+                            if output_file:
+                                try:
+                                    shutil.copy(temp_output, output_file)
+                                    messagebox.showinfo("저장 완료", f"엑셀 보고서가 성공적으로 저장되었습니다:\n{output_file}")
+                                except Exception as err:
+                                    messagebox.showerror("저장 실패", f"파일 저장 중 오류 발생: {err}")
+                    self.root.after(0, ask_save)
                 else:
                     self.root.after(0, lambda: messagebox.showerror("오류 발생", f"퀀트 분석기 실행 실패:\n{res.stderr}"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("오류 발생", f"오류 메시지: {e}"))
             finally:
+                # 임시 파일 삭제
+                if os.path.exists(temp_output):
+                    try:
+                        os.remove(temp_output)
+                    except Exception:
+                        pass
                 self.root.after(0, self.manual_refresh)
                 
         threading.Thread(target=execute_backend, daemon=True).start()
+
 
 
 if __name__ == "__main__":

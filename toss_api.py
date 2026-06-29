@@ -88,17 +88,39 @@ class TossinvestClient:
             headers["X-Tossinvest-Account"] = str(self.account_seq)
         return headers
 
+    def _request(self, method, path, require_account=True, params=None, json_data=None):
+        """
+        HTTP 요청 통합 헬퍼로, 401 Unauthorized 발생 시 캐시된 토큰을 지우고 자동 재시도합니다.
+        """
+        url = f"{self.base_url}{path}" if path.startswith("/") else path
+        
+        # 1차 시도
+        headers = self.get_headers(require_account=require_account)
+        if json_data is not None:
+            headers["Content-Type"] = "application/json"
+            
+        res = requests.request(method, url, headers=headers, params=params, json=json_data, timeout=15)
+        
+        # 401 발생 시 토큰 무효화 후 2차 시도
+        if res.status_code == 401:
+            print("[TOSS API] 401 Unauthorized 감지. 캐시된 토큰 무효화 후 자동 재발급 및 재시도합니다.")
+            self.access_token = None
+            self.account_seq = None  # 계좌도 재조회하도록 무효화
+            
+            headers = self.get_headers(require_account=require_account)
+            if json_data is not None:
+                headers["Content-Type"] = "application/json"
+            res = requests.request(method, url, headers=headers, params=params, json=json_data, timeout=15)
+            
+        res.raise_for_status()
+        return res.json()
+
     def get_holdings(self):
         """
         보유 주식 잔고 목록을 조회합니다.
         """
-        url = f"{self.base_url}/api/v1/holdings"
         try:
-            res = requests.get(url, headers=self.get_headers(require_account=True), timeout=10)
-            res.raise_for_status()
-            res_json = res.json()
-            
-            # getHoldings_200_response 스키마: result -> items -> HoldingsItem 리스트
+            res_json = self._request("GET", "/api/v1/holdings", require_account=True)
             holdings_overview = res_json.get("result", {})
             return holdings_overview.get("items", [])
         except Exception as e:
@@ -109,14 +131,9 @@ class TossinvestClient:
         """
         현금 기반 매수 가능 금액(예수금)을 조회합니다.
         """
-        url = f"{self.base_url}/api/v1/buying-power"
         params = {"currency": currency}
         try:
-            res = requests.get(url, headers=self.get_headers(require_account=True), params=params, timeout=10)
-            res.raise_for_status()
-            res_json = res.json()
-            
-            # getBuyingPower_200_response 스키마: result -> cashBuyingPower
+            res_json = self._request("GET", "/api/v1/buying-power", require_account=True, params=params)
             buying_power_res = res_json.get("result", {})
             return float(buying_power_res.get("cashBuyingPower", 0.0))
         except Exception as e:
@@ -127,14 +144,9 @@ class TossinvestClient:
         """
         실시간 환율을 조회합니다.
         """
-        url = f"{self.base_url}/api/v1/exchange-rate"
         params = {"baseCurrency": base, "quoteCurrency": quote}
         try:
-            res = requests.get(url, headers=self.get_headers(require_account=False), params=params, timeout=10)
-            res.raise_for_status()
-            res_json = res.json()
-            
-            # getExchangeRate_200_response 스키마: result -> rate
+            res_json = self._request("GET", "/api/v1/exchange-rate", require_account=False, params=params)
             rate_res = res_json.get("result", {})
             return float(rate_res.get("rate", 1300.0))
         except Exception as e:
@@ -151,20 +163,13 @@ class TossinvestClient:
         - order_type: 'MARKET' 또는 'LIMIT'
         - order_amount: 주문 금액 (달러 단위, US 시장가 매수 전용)
         """
-        url = f"{self.base_url}/api/v1/orders"
-        headers = self.get_headers(require_account=True)
-        headers["Content-Type"] = "application/json"
-        
-        # 멱등성 보장 및 중복 주문 방지를 위한 clientOrderId 생성
         client_order_id = str(uuid.uuid4())
-        
         body = {
             "clientOrderId": client_order_id,
             "symbol": symbol,
             "side": side,
             "orderType": order_type
         }
-        
         if quantity is not None:
             body["quantity"] = quantity
         if order_amount is not None:
@@ -173,30 +178,21 @@ class TossinvestClient:
             body["price"] = price
 
         try:
-            res = requests.post(url, headers=headers, json=body, timeout=15)
-            res.raise_for_status()
-            return res.json().get("result", {})
+            res_json = self._request("POST", "/api/v1/orders", require_account=True, json_data=body)
+            return res_json.get("result", {})
         except Exception as e:
-            # 상세 오류 메시지 파싱 시도
-            try:
-                err_msg = res.json().get("message", str(e))
-                raise Exception(f"{err_msg} (HTTP {res.status_code})")
-            except Exception:
-                raise Exception(str(e))
+            raise Exception(str(e))
 
     def get_orders(self, status="OPEN"):
         """
         주문 목록을 조회합니다.
         - status: 'OPEN' (미체결/대기), 'CLOSED' (체결완료/취소) 등 (기본값: 'OPEN')
         """
-        url = f"{self.base_url}/api/v1/orders"
         params = {}
         if status:
             params["status"] = status
         try:
-            res = requests.get(url, headers=self.get_headers(require_account=True), params=params, timeout=10)
-            res.raise_for_status()
-            res_json = res.json()
+            res_json = self._request("GET", "/api/v1/orders", require_account=True, params=params)
             return res_json.get("result", {}).get("orders", [])
         except Exception as e:
             print(f"[TOSS API WARNING] 주문 목록 조회 실패: {e}")
@@ -206,15 +202,9 @@ class TossinvestClient:
         """
         특정 대기 중인 주문을 취소합니다.
         """
-        url = f"{self.base_url}/api/v1/orders/{order_id}/cancel"
-        headers = self.get_headers(require_account=True)
-        headers["Content-Type"] = "application/json"
         try:
-            res = requests.post(url, headers=headers, json={}, timeout=10)
-            res.raise_for_status()
-            return res.json().get("result", {})
+            res_json = self._request("POST", f"/api/v1/orders/{order_id}/cancel", require_account=True, json_data={})
+            return res_json.get("result", {})
         except Exception as e:
             print(f"[TOSS API WARNING] 주문 취소 실패 (주문번호 {order_id}): {e}")
             return {}
-
-
