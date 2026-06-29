@@ -461,9 +461,16 @@ class LiveDashboardApp:
         tab_port = tk.Frame(tab_control, bg="#1E293B")
         tab_control.add(tab_port, text="  최종 추천 포트폴리오  ")
 
-        # Treeview for Portfolio
+        # 좌우로 나누기 위한 프레임 생성
+        port_left_frame = tk.Frame(tab_port, bg="#1E293B")
+        port_left_frame.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+        
+        port_right_frame = tk.Frame(tab_port, bg="#1E293B")
+        port_right_frame.pack(side="right", fill="both", expand=False, padx=5, pady=5)
+
+        # Treeview for Portfolio (좌측 프레임에 배치)
         cols_port = list(df_port.columns)
-        tree_port = ttk.Treeview(tab_port, columns=cols_port, show="headings")
+        tree_port = ttk.Treeview(port_left_frame, columns=cols_port, show="headings")
         for col in cols_port:
             tree_port.heading(col, text=col)
             # 정렬 및 너비 설정
@@ -475,9 +482,9 @@ class LiveDashboardApp:
                 tree_port.column(col, width=90, anchor="e")
             else:
                 tree_port.column(col, width=110, anchor="e")
-        tree_port.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+        tree_port.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # 원형 그래프 (Matplotlib) 그리기 및 임베드
+        # 원형 그래프 (Matplotlib) 그리기 및 임베드 (우측 프레임에 배치)
         try:
             import matplotlib
             matplotlib.use("TkAgg")
@@ -533,17 +540,15 @@ class LiveDashboardApp:
                 
             ax.axis('equal')
             
-            canvas_frame = tk.Frame(tab_port, bg="#1E293B")
-            canvas_frame.pack(side="right", fill="both", expand=False, padx=10, pady=10)
-            
-            canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+            canvas = FigureCanvasTkAgg(fig, master=port_right_frame)
             canvas.draw()
-            canvas.get_tk_widget().pack(fill="both", expand=True)
+            canvas.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
             plt.close(fig)
         except Exception as e:
             print(f"[PIE CHART ERROR] {e}")
-            # 차트 렌더링 실패 시 테이블을 가득 채움
-            tree_port.pack_configure(side="left", fill="both", expand=True)
+            # 차트 렌더링 실패 시 우측 프레임을 파괴하고 좌측 프레임을 전체로 채움
+            port_right_frame.destroy()
+            port_left_frame.pack_configure(fill="both", expand=True)
         
         # 데이터 삽입
         for _, row in df_port.iterrows():
@@ -632,6 +637,48 @@ class LiveDashboardApp:
                              relief="flat", padx=15, pady=5, command=save_excel)
         btn_save.pack(side="left", padx=20)
 
+
+            
+        def show_execution_log_popup(stdout_text, stderr_text):
+            log_popup = tk.Toplevel(self.root)
+            log_popup.title("📄 실계좌 주문 전송 실행 로그")
+            log_popup.geometry("750x500")
+            log_popup.configure(bg="#0F172A")
+            log_popup.transient(popup)
+            log_popup.grab_set()
+            
+            lbl_title = tk.Label(log_popup, text="📋 토스증권 Open API 주문 전송 실행 결과 로그", font=("Malgun Gothic", 12, "bold"), fg="#3B82F6", bg="#0F172A")
+            lbl_title.pack(pady=10)
+            
+            txt_frame = tk.Frame(log_popup, bg="#0F172A")
+            txt_frame.pack(fill="both", expand=True, padx=20, pady=5)
+            
+            txt_log = tk.Text(txt_frame, bg="#1E293B", fg="#F8FAFC", insertbackground="white", font=("Consolas", 10), wrap="word", relief="flat")
+            txt_log.pack(side="left", fill="both", expand=True)
+            
+            scroll = ttk.Scrollbar(txt_frame, orient="vertical", command=txt_log.yview)
+            txt_log.configure(yscrollcommand=scroll.set)
+            scroll.pack(side="right", fill="y")
+            
+            import re
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            clean_stdout = ansi_escape.sub('', stdout_text)
+            clean_stderr = ansi_escape.sub('', stderr_text)
+            
+            full_log = ""
+            if clean_stdout:
+                full_log += "=== 표준 출력 로그 ===\n" + clean_stdout + "\n"
+            if clean_stderr:
+                full_log += "=== 표준 에러/오류 로그 ===\n" + clean_stderr + "\n"
+                
+            txt_log.insert("1.0", full_log)
+            txt_log.config(state="disabled")
+            
+            btn_close = tk.Button(log_popup, text="확인 후 닫기", font=("Malgun Gothic", 10, "bold"),
+                                  bg="#64748B", fg="#FFFFFF", activebackground="#475569", activeforeground="#FFFFFF",
+                                  relief="flat", padx=20, pady=5, command=log_popup.destroy)
+            btn_close.pack(pady=15)
+
         # 실제 토스 계좌 주문 전송 함수
         def send_real_orders():
             if df_rebal is None or df_rebal.empty:
@@ -647,7 +694,6 @@ class LiveDashboardApp:
             def execute_real_orders_bg():
                 try:
                     import subprocess
-                    # --execute 인자를 주어 실 계좌 주문을 구동시킴 (대화상자 팝업 방지를 위해 임시 출력 파일 지정)
                     cmd = ["python", "quant_analyzer.py", "--execute", "--output", "temp_exec_output.xlsx"]
                     if self.is_offline:
                         cmd.append("--test")
@@ -660,11 +706,12 @@ class LiveDashboardApp:
                         except Exception:
                             pass
                             
+                    # 실행 결과 로그 창을 팝업
+                    self.root.after(0, lambda: show_execution_log_popup(res.stdout, res.stderr))
+                    
                     if res.returncode == 0:
-                        self.root.after(0, lambda: messagebox.showinfo("주문 전송 완료", "토스증권 Open API 실계좌 리밸런싱 주문 전송이 안전하게 완료되었습니다!\n상세 체결 정보는 대시보드 화면 및 토스증권 앱을 확인해 주세요."))
-                        self.root.after(0, lambda: btn_execute.config(text="✅ 주문 완료"))
+                        self.root.after(0, lambda: btn_execute.config(text="✅ 전송 완료"))
                     else:
-                        self.root.after(0, lambda: messagebox.showerror("주문 실패", f"주문 전송 중 오류 발생:\n{res.stderr}"))
                         self.root.after(0, lambda: btn_execute.config(state="normal", text="🚀 실제 토스 주문 전송"))
                 except Exception as err:
                     self.root.after(0, lambda: messagebox.showerror("주문 실패", f"연동 프로세스 실행 실패: {err}"))
