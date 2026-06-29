@@ -1,10 +1,10 @@
 @echo off
-chcp 65001 >nul
 cd /d "%~dp0"
-title 토스증권 실시간 포트폴리오 대시보드
+title Toss Live Portfolio Dashboard Launcher
 echo ==================================================
-echo   토스증권 실시간 포트폴리오 대시보드를 시작합니다.
-echo   API 인증 정보를 확인하고 실시간 조회를 개시합니다...
+echo   Toss Securities Live Portfolio Dashboard
+echo   Starting the GUI application...
+echo   Please keep this terminal window open.
 echo ==================================================
 python dashboard.py
 pause
