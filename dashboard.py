@@ -139,18 +139,20 @@ class LiveDashboardApp:
         table_frame = tk.Frame(self.root, bg="#0F172A")
         table_frame.pack(fill="both", expand=True, padx=30, pady=5)
         
-        self.tree = ttk.Treeview(table_frame, columns=("Symbol", "Qty", "Price", "Value", "Currency"), show="headings")
+        self.tree = ttk.Treeview(table_frame, columns=("Symbol", "Name", "Qty", "Price", "Value", "Currency"), show="headings")
         self.tree.heading("Symbol", text="종목 코드")
+        self.tree.heading("Name", text="회사명")
         self.tree.heading("Qty", text="보유 수량")
         self.tree.heading("Price", text="현재가")
         self.tree.heading("Value", text="평가 금액(원화)")
         self.tree.heading("Currency", text="통화")
         
-        self.tree.column("Symbol", width=120, anchor="center")
-        self.tree.column("Qty", width=120, anchor="e")
-        self.tree.column("Price", width=150, anchor="e")
-        self.tree.column("Value", width=180, anchor="e")
-        self.tree.column("Currency", width=100, anchor="center")
+        self.tree.column("Symbol", width=100, anchor="center")
+        self.tree.column("Name", width=180, anchor="w")
+        self.tree.column("Qty", width=100, anchor="e")
+        self.tree.column("Price", width=120, anchor="e")
+        self.tree.column("Value", width=150, anchor="e")
+        self.tree.column("Currency", width=80, anchor="center")
         self.tree.pack(fill="both", expand=True, side="left")
         
         scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
@@ -219,17 +221,51 @@ class LiveDashboardApp:
             holdings_list = []
             stock_valuation = 0.0
             
+            # 한글/영어 매핑 사전
+            name_mapping = {
+                'NVDA': '엔비디아', 'AAPL': '애플', 'MSFT': '마이크로소프트', 'AMD': 'AMD',
+                'JPM': 'JP모건 체이스', 'GS': '골드만삭스', 'BAC': '뱅크오브아메리카', 'WFC': '웰스파고',
+                'XOM': '엑슨모빌', 'CVX': '쉐브론', 'COP': '코노코필립스', 'BBY': '베스트바이',
+                'SNDK': '샌디스크', 'F': '포드', '005930': '삼성전자', '000660': 'SK하이닉스',
+                '373220': 'LG에너지솔루션', '207940': '삼성바이오로직스', '005380': '현대차',
+                '000270': '기아', '068270': '셀트리온', '051910': 'LG화학', '035420': 'NAVER',
+                '006400': '삼성SDI', '105560': 'KB금융', '055550': '신한지주', '028260': '삼성물산',
+                '012330': '현대모비스', '066570': 'LG전자', '032830': '삼성생명', '003670': '포스코퓨처엠',
+                '033780': 'KT&G', '011200': 'HMM', '035720': '카카오'
+            }
+            
             for item in toss_holdings:
                 sym = item.get("symbol")
                 qty = float(item.get("quantity", 0.0))
                 price = float(item.get("lastPrice", 0.0))
                 currency = item.get("currency", "KRW")
                 
+                # 매핑된 이름 찾기 (없으면 티커 그대로 또는 야후 검색 API로 자동 로드 시도)
+                name = name_mapping.get(sym)
+                if not name:
+                    # 야후 파이낸스 검색 API로 회사명 가져오기 시도
+                    try:
+                        import urllib.request
+                        import json
+                        req = urllib.request.Request(
+                            f"https://query2.finance.yahoo.com/v1/finance/search?q={sym}",
+                            headers={'User-Agent': 'Mozilla/5.0'}
+                        )
+                        with urllib.request.urlopen(req, timeout=3) as res:
+                            search_data = json.loads(res.read())
+                            quotes = search_data.get('quotes', [])
+                            if quotes:
+                                name = quotes[0].get('longname') or quotes[0].get('shortname') or sym
+                            else:
+                                name = sym
+                    except Exception:
+                        name = sym
+                        
                 price_krw = price * usd_krw if currency == "USD" else price
                 val_krw = qty * price_krw
                 stock_valuation += val_krw
                 
-                holdings_list.append((sym, qty, price, val_krw, currency))
+                holdings_list.append((sym, name, qty, price, val_krw, currency))
                 
             total_assets = cash_balance + stock_valuation
             
@@ -249,13 +285,13 @@ class LiveDashboardApp:
             self.tree.delete(row)
             
         for h in holdings_list:
-            sym, qty, price, val, curr = h
+            sym, name, qty, price, val, curr = h
             # 수량과 금액 예쁘게 포맷
             qty_str = f"{qty:.6f}" if curr == "USD" else f"{qty:,.0f}"
             price_str = f"$ {price:,.2f}" if curr == "USD" else f"₩ {price:,.0f}"
             val_str = f"₩ {val:,.0f}"
             
-            self.tree.insert("", "end", values=(sym, qty_str, price_str, val_str, curr))
+            self.tree.insert("", "end", values=(sym, name, qty_str, price_str, val_str, curr))
             
     def show_error_message(self, err_msg):
         self.var_countdown.set("⚠️ 통신 에러 발생")
@@ -379,11 +415,13 @@ class LiveDashboardApp:
             tree_port.heading(col, text=col)
             # 정렬 및 너비 설정
             if col in ['Ticker', 'Market', 'Industry']:
-                tree_port.column(col, width=100, anchor="center")
+                tree_port.column(col, width=90, anchor="center")
+            elif col == 'Name':
+                tree_port.column(col, width=150, anchor="w")
             elif col in ['Pure_Alpha(%)', 'AI_News_Score', 'Weight(%)']:
-                tree_port.column(col, width=120, anchor="e")
+                tree_port.column(col, width=100, anchor="e")
             else:
-                tree_port.column(col, width=150, anchor="e")
+                tree_port.column(col, width=130, anchor="e")
         tree_port.pack(fill="both", expand=True, padx=10, pady=10)
         
         # 데이터 삽입
@@ -413,12 +451,14 @@ class LiveDashboardApp:
                 tree_rebal.heading(col, text=col)
                 if col in ['Ticker', 'Toss_Symbol', 'Action', 'Currency']:
                     tree_rebal.column(col, width=80, anchor="center")
+                elif col == 'Name':
+                    tree_rebal.column(col, width=140, anchor="w")
                 elif col in ['Reason']:
-                    tree_rebal.column(col, width=250, anchor="w")
+                    tree_rebal.column(col, width=220, anchor="w")
                 elif col in ['Current_Qty', 'Target_Qty', 'Diff_Qty']:
-                    tree_rebal.column(col, width=90, anchor="e")
+                    tree_rebal.column(col, width=80, anchor="e")
                 else:
-                    tree_rebal.column(col, width=110, anchor="e")
+                    tree_rebal.column(col, width=100, anchor="e")
             tree_rebal.pack(fill="both", expand=True, padx=10, pady=10)
 
             for _, row in df_rebal.iterrows():
@@ -468,8 +508,50 @@ class LiveDashboardApp:
 
         btn_save = tk.Button(btn_frame, text="📥 엑셀 파일 저장", font=("Malgun Gothic", 10, "bold"),
                              bg="#3B82F6", fg="#FFFFFF", activebackground="#2563EB", activeforeground="#FFFFFF",
-                             relief="flat", padx=20, pady=5, command=save_excel)
-        btn_save.pack(side="left", padx=30)
+                             relief="flat", padx=15, pady=5, command=save_excel)
+        btn_save.pack(side="left", padx=20)
+
+        # 실제 토스 계좌 주문 전송 함수
+        def send_real_orders():
+            if df_rebal is None or df_rebal.empty:
+                messagebox.showinfo("주문 대상 없음", "분석 결과 전송할 매매 리밸런싱 주문이 존재하지 않습니다.")
+                return
+                
+            confirm = messagebox.askyesno("⚠️ 실계좌 매매 전송", "정말로 토스증권 Open API를 통해 실제 계좌 매매 주문(시장가)을 보내시겠습니까?\n이 작업은 즉시 실제 주식 거래로 체결됩니다!")
+            if not confirm:
+                return
+                
+            btn_execute.config(state="disabled", text="⏳ 주문 전송 중...")
+            
+            def execute_real_orders_bg():
+                try:
+                    import subprocess
+                    # --execute 인자를 주어 실 계좌 주문을 구동시킴
+                    cmd = ["python", "quant_analyzer.py", "--execute"]
+                    if self.is_offline:
+                        cmd.append("--test")
+                        
+                    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                    
+                    if res.returncode == 0:
+                        self.root.after(0, lambda: messagebox.showinfo("주문 전송 완료", "토스증권 Open API 실계좌 리밸런싱 주문 전송이 안전하게 완료되었습니다!\n상세 체결 정보는 대시보드 화면 및 토스증권 앱을 확인해 주세요."))
+                        self.root.after(0, lambda: btn_execute.config(text="✅ 주문 완료"))
+                    else:
+                        self.root.after(0, lambda: messagebox.showerror("주문 실패", f"주문 전송 중 오류 발생:\n{res.stderr}"))
+                        self.root.after(0, lambda: btn_execute.config(state="normal", text="🚀 실제 토스 주문 전송"))
+                except Exception as err:
+                    self.root.after(0, lambda: messagebox.showerror("주문 실패", f"연동 프로세스 실행 실패: {err}"))
+                    self.root.after(0, lambda: btn_execute.config(state="normal", text="🚀 실제 토스 주문 전송"))
+                finally:
+                    self.root.after(0, self.manual_refresh)
+                    
+            threading.Thread(target=execute_real_orders_bg, daemon=True).start()
+
+        # 실제 주문 전송 버튼
+        btn_execute = tk.Button(btn_frame, text="🚀 실제 토스 주문 전송", font=("Malgun Gothic", 10, "bold"),
+                                bg="#10B981", fg="#FFFFFF", activebackground="#059669", activeforeground="#FFFFFF",
+                                relief="flat", padx=15, pady=5, command=send_real_orders)
+        btn_execute.pack(side="left", padx=20)
 
         # 창이 닫힐 때 임시 파일 제거 이벤트 바인딩
         def on_popup_close():
@@ -484,8 +566,8 @@ class LiveDashboardApp:
 
         btn_close = tk.Button(btn_frame, text="확인 / 닫기", font=("Malgun Gothic", 10, "bold"),
                               bg="#64748B", fg="#FFFFFF", activebackground="#475569", activeforeground="#FFFFFF",
-                              relief="flat", padx=20, pady=5, command=on_popup_close)
-        btn_close.pack(side="right", padx=30)
+                              relief="flat", padx=15, pady=5, command=on_popup_close)
+        btn_close.pack(side="right", padx=20)
 
 
 

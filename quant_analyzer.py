@@ -162,12 +162,18 @@ def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
     
     benchmark_ticker = '^GSPC'
     
+    names = {}
     if is_test:
         log_info("테스트용 소형 유니버스를 분석합니다.")
         stocks = {
             'NVDA': 'Technology', 'AAPL': 'Technology', 'MSFT': 'Technology', 'AMD': 'Technology',
             'JPM': 'Financials', 'GS': 'Financials', 'BAC': 'Financials', 'WFC': 'Financials',
             'XOM': 'Energy', 'CVX': 'Energy', 'COP': 'Energy'
+        }
+        names = {
+            'NVDA': '엔비디아', 'AAPL': '애플', 'MSFT': '마이크로소프트', 'AMD': 'AMD',
+            'JPM': 'JP모건 체이스', 'GS': '골드만삭스', 'BAC': '뱅크오브아메리카', 'WFC': '웰스파고',
+            'XOM': '엑슨모빌', 'CVX': '쉐브론', 'COP': '코노코필립스'
         }
         benchmark_ticker = '^GSPC'
     elif market == 'SP500':
@@ -177,6 +183,7 @@ def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
             sp500_df['Symbol'] = sp500_df['Symbol'].str.replace('.', '-', regex=False)
             sp500_df['Symbol'] = sp500_df['Symbol'].replace({'BRKB': 'BRK-B', 'BFB': 'BF-B'})
             stocks = dict(zip(sp500_df['Symbol'], sp500_df['Sector']))
+            names = dict(zip(sp500_df['Symbol'], sp500_df['Name']))
         except Exception as e:
             log_error(f"S&P 500 목록 조회 실패: {e}")
             return pd.DataFrame()
@@ -186,13 +193,13 @@ def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
             krx_df = fdr.StockListing('KRX')
             krx_df = krx_df.dropna(subset=['Sector']).head(100)
             stocks = {}
+            names = {}
             for _, row in krx_df.iterrows():
                 code = row['Code']
                 market_type = row['Market']
-                if 'KOSDAQ' in str(market_type):
-                    stocks[f"{code}.KQ"] = row['Sector']
-                else:
-                    stocks[f"{code}.KS"] = row['Sector']
+                ticker_key = f"{code}.KQ" if 'KOSDAQ' in str(market_type) else f"{code}.KS"
+                stocks[ticker_key] = row['Sector']
+                names[ticker_key] = row['Name']
             benchmark_ticker = '^KS11'
         except Exception as e:
             log_warn(f"KRX 데이터 수집 실패: {e}. 우량주 20개로 대체합니다.")
@@ -205,9 +212,19 @@ def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
                 '032830.KS': 'Financials', '003670.KS': 'Technology', '033780.KS': 'Technology',
                 '011200.KS': 'Industrials', '035720.KS': 'Technology'
             }
+            names = {
+                '005930.KS': '삼성전자', '000660.KS': 'SK하이닉스', '373220.KS': 'LG에너지솔루션',
+                '207940.KS': '삼성바이오로직스', '005380.KS': '현대차', '000270.KS': '기아',
+                '068270.KS': '셀트리온', '051910.KS': 'LG화학', '035420.KS': 'NAVER',
+                '006400.KS': '삼성SDI', '105560.KS': 'KB금융', '055550.KS': '신한지주',
+                '028260.KS': '삼성물산', '012330.KS': '현대모비스', '066570.KS': 'LG전자',
+                '032830.KS': '삼성생명', '003670.KS': '포스코퓨처엠', '033780.KS': 'KT&G',
+                '011200.KS': 'HMM', '035720.KS': '카카오'
+            }
             benchmark_ticker = '^KS11'
     else:
         stocks = {}
+        names = {}
 
     tickers = list(stocks.keys())
     
@@ -267,6 +284,7 @@ def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
             # 3. 알파 지표 계산
             alpha_scores = {
                 'Ticker': ticker,
+                'Name': names.get(ticker, 'Unknown'),
                 'Industry': stocks.get(ticker, 'Unknown'),
                 'alpha_1': AlphaFactory.alpha_1_return_5d(df_ticker_ohlcv),
                 'alpha_2': AlphaFactory.alpha_2_return_20d(df_ticker_ohlcv),
@@ -514,8 +532,8 @@ def export_to_excel(output_filename, df_portfolio, df_alpha, df_market, df_dict,
                 ws_port.set_row(3 + r_idx, 20)
                 for c_idx, val in enumerate(row):
                     col_name = headers_port[c_idx]
-                    if col_name in ['Ticker', 'Industry', 'Market']:
-                        ws_port.write(3 + r_idx, c_idx, val, center_format)
+                    if col_name in ['Ticker', 'Name', 'Industry', 'Market']:
+                        ws_port.write(3 + r_idx, c_idx, val, center_format if col_name != 'Name' else cell_format)
                     elif col_name in ['Pure_Alpha(%)', 'AI_News_Score']:
                         ws_port.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, num_format)
                     elif col_name == 'Weight(%)':
@@ -545,8 +563,8 @@ def export_to_excel(output_filename, df_portfolio, df_alpha, df_market, df_dict,
                     ws_rebal.set_row(3 + r_idx, 20)
                     for c_idx, val in enumerate(row):
                         col_name = headers_rebal[c_idx]
-                        if col_name in ['Ticker', 'Toss_Symbol', 'Currency', 'Action', 'Reason']:
-                            ws_rebal.write(3 + r_idx, c_idx, val, center_format if col_name != 'Reason' else cell_format)
+                        if col_name in ['Ticker', 'Name', 'Toss_Symbol', 'Currency', 'Action', 'Reason']:
+                            ws_rebal.write(3 + r_idx, c_idx, val, center_format if col_name not in ['Reason', 'Name'] else cell_format)
                         elif col_name in ['Target_Weight(%)']:
                             ws_rebal.write(3 + r_idx, c_idx, float(val) if pd.notna(val) else 0.0, pct_format)
                         elif col_name in ['Target_Value(KRW)', 'Current_Value(KRW)', 'Diff_Value(KRW)']:
@@ -846,7 +864,7 @@ if __name__ == "__main__":
                 print("\n" + "="*60)
                 log_success(f"🚀 [최종 타겟 듀얼 포트폴리오 (50/50)] 제안 (총 자본금: {capital_amount:,.0f} KRW)")
                 print("="*60)
-                output_cols = ['Market', 'Industry', 'Pure_Alpha(%)', 'AI_News_Score', 'Weight(%)', 'Invest_Amount(KRW)']
+                output_cols = ['Name', 'Market', 'Industry', 'Pure_Alpha(%)', 'AI_News_Score', 'Weight(%)', 'Invest_Amount(KRW)']
                 print(final_portfolio[output_cols].round(2).to_string())
                 print("="*60 + "\n")
                 
@@ -949,6 +967,7 @@ if __name__ == "__main__":
                         # 유니버스 외 보유 주식 -> 전량 매도
                         rebal_data.append({
                             "Ticker": f"{sym} (유니버스 외)",
+                            "Name": sym,
                             "Toss_Symbol": sym,
                             "Action": "SELL",
                             "Reason": "유니버스 제외 대상 즉시 청산",
@@ -964,10 +983,13 @@ if __name__ == "__main__":
                         })
                         continue
                         
+                    ticker_desc_name = alpha_results.at[ticker_name, 'Name'] if 'Name' in alpha_results.columns else ticker_name
+                    
                     if is_winter:
                         # 겨울 국면일 경우 무조건 전량 현금화
                         rebal_data.append({
                             "Ticker": ticker_name,
+                            "Name": ticker_desc_name,
                             "Toss_Symbol": sym,
                             "Action": "SELL",
                             "Reason": "WINTER 국면 전환 전량 청산 (Cash is King)",
@@ -992,6 +1014,7 @@ if __name__ == "__main__":
                     if is_stop_hit:
                         rebal_data.append({
                             "Ticker": ticker_name,
+                            "Name": ticker_desc_name,
                             "Toss_Symbol": sym,
                             "Action": "SELL",
                             "Reason": f"샹들리에 추적손절 청산 (손절가: {stop_price:.2f}, 최고가: {highest_price:.2f})",
@@ -1012,6 +1035,7 @@ if __name__ == "__main__":
                     if rank > 10:
                         rebal_data.append({
                             "Ticker": ticker_name,
+                            "Name": ticker_desc_name,
                             "Toss_Symbol": sym,
                             "Action": "SELL",
                             "Reason": f"느슨한 로테이션 청산 (현재 풀 내 순위: {rank}위, TOP 10 밖으로 밀림)",
@@ -1035,6 +1059,7 @@ if __name__ == "__main__":
                         
                     rebal_data.append({
                         "Ticker": ticker_name,
+                        "Name": ticker_desc_name,
                         "Toss_Symbol": sym,
                         "Action": "HOLD",
                         "Reason": f"보유 유지 (현재 순위: {rank}위, 최고가: {highest_price:.2f})",
@@ -1079,6 +1104,7 @@ if __name__ == "__main__":
                         
                         for ticker in to_buy_us:
                             t_sym = get_toss_symbol(ticker)
+                            ticker_desc_name = alpha_results.at[ticker, 'Name'] if 'Name' in alpha_results.columns else ticker
                             price_original = 0.0
                             price_krw = 0.0
                             try:
@@ -1094,6 +1120,7 @@ if __name__ == "__main__":
                                 if target_qty > 0:
                                     rebal_data.append({
                                         "Ticker": ticker,
+                                        "Name": ticker_desc_name,
                                         "Toss_Symbol": t_sym,
                                         "Action": "BUY",
                                         "Reason": f"미국 신규 진입 (달러 예수금 매수, 랭킹 {us_rank_dict.get(ticker, 0)}위)",
@@ -1121,6 +1148,7 @@ if __name__ == "__main__":
                         
                         for ticker in to_buy_kr:
                             t_sym = get_toss_symbol(ticker)
+                            ticker_desc_name = alpha_results.at[ticker, 'Name'] if 'Name' in alpha_results.columns else ticker
                             price_original = 0.0
                             price_krw = 0.0
                             try:
@@ -1136,6 +1164,7 @@ if __name__ == "__main__":
                                 if target_qty > 0:
                                     rebal_data.append({
                                         "Ticker": ticker,
+                                        "Name": ticker_desc_name,
                                         "Toss_Symbol": t_sym,
                                         "Action": "BUY",
                                         "Reason": f"국내 신규 진입 (원화 예수금 매수, 랭킹 {kr_rank_dict.get(ticker, 0)}위)",
