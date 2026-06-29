@@ -708,6 +708,41 @@ def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None)
         log_warn(f"[{ticker}] Chandelier Exit 계산 실패: {e}")
         return False, 0.0
 
+def is_us_market_open():
+    import datetime
+    now = datetime.datetime.now() # KST
+    weekday = now.weekday()
+    if weekday == 5 and now.hour >= 6:
+        return False
+    if weekday == 6:
+        return False
+    if weekday == 0 and now.hour < 9:
+        return False
+    hour = now.hour
+    minute = now.minute
+    if hour == 22 and minute >= 30:
+        return True
+    if hour >= 23:
+        return True
+    if hour < 6:
+        return True
+    return False
+
+def is_kr_market_open():
+    import datetime
+    now = datetime.datetime.now()
+    weekday = now.weekday()
+    if weekday >= 5:
+        return False
+    hour = now.hour
+    minute = now.minute
+    if 9 <= hour < 15:
+        return True
+    if hour == 15 and minute <= 30:
+        return True
+    return False
+
+
 if __name__ == "__main__":
     print_banner()
     
@@ -1197,6 +1232,9 @@ if __name__ == "__main__":
                             log_error("TOSS API 인증 정보가 구성되지 않아 실제 주문을 보낼 수 없습니다. .env 파일을 세팅해 주세요.")
                         else:
                             log_warn("🚨 토스증권 API를 통해 계좌 실주문을 전송합니다.")
+                            kr_open = is_kr_market_open()
+                            us_open = is_us_market_open()
+                            log_info(f"⏰ 현재 시장 영업 상태: 한국 시장(KRX) - {'영업중' if kr_open else '휴장중'} | 미국 시장(S&P500) - {'영업중' if us_open else '휴장중'}")
                             
                             # 0. 기존 미체결/예약 주문 취소
                             log_info("0단계: 기존 대기 중인 예약/미체결 주문 취소 검토 중...")
@@ -1210,6 +1248,13 @@ if __name__ == "__main__":
                                     for p_ord in pending_orders:
                                         p_symbol = p_ord.get("symbol")
                                         p_order_id = p_ord.get("orderId")
+                                        
+                                        is_us = not p_symbol.isdigit()
+                                        if is_us and not us_open:
+                                            continue
+                                        if not is_us and not kr_open:
+                                            continue
+                                            
                                         if p_symbol in symbols_to_cancel or any(get_toss_symbol(t) == p_symbol for t in alpha_results.index):
                                             log_warn(f"[{p_symbol}] 대기 중인 기존 예약 주문(ID: {p_order_id}) 취소 요청 중...")
                                             toss_client.cancel_order(p_order_id)
@@ -1232,6 +1277,15 @@ if __name__ == "__main__":
                                 sym = row['Toss_Symbol']
                                 qty = int(abs(row['Diff_Qty']))
                                 if qty <= 0: continue
+                                
+                                is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
+                                if is_us and not us_open:
+                                    log_warn(f"[{t_name}] 미국 시장이 휴장 상태이므로 매도 주문을 전송하지 않고 건너뜁니다. (미국 시장 개장 시간: 한국 시간 22:30 ~ 06:00)")
+                                    continue
+                                if not is_us and not kr_open:
+                                    log_warn(f"[{t_name}] 한국 시장이 휴장 상태이므로 매도 주문을 전송하지 않고 건너뜁니다. (한국 시장 개장 시간: 평일 09:00 ~ 15:30)")
+                                    continue
+                                    
                                 log_info(f"[{t_name}] 매도 주문 전송: {qty}주 (사유: {row['Reason']})")
                                 try:
                                     res = toss_client.create_order(symbol=sym, side="SELL", quantity=qty, order_type="MARKET")
@@ -1246,6 +1300,15 @@ if __name__ == "__main__":
                                 sym = row['Toss_Symbol']
                                 qty = int(row['Diff_Qty'])
                                 if qty <= 0: continue
+                                
+                                is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
+                                if is_us and not us_open:
+                                    log_warn(f"[{t_name}] 미국 시장이 휴장 상태이므로 매수 주문을 전송하지 않고 건너뜁니다. (미국 시장 개장 시간: 한국 시간 22:30 ~ 06:00)")
+                                    continue
+                                if not is_us and not kr_open:
+                                    log_warn(f"[{t_name}] 한국 시장이 휴장 상태이므로 매수 주문을 전송하지 않고 건너뜁니다. (한국 시장 개장 시간: 평일 09:00 ~ 15:30)")
+                                    continue
+                                    
                                 log_info(f"[{t_name}] 매수 주문 전송: {qty}주 (사유: {row['Reason']})")
                                 try:
                                     res = toss_client.create_order(symbol=sym, side="BUY", quantity=qty, order_type="MARKET")

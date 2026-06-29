@@ -299,13 +299,13 @@ class LiveDashboardApp:
         
     def auto_refresh_loop(self):
         """
-        5초 주기 자동 갱신 루프 스레드
+        60초 주기 자동 갱신 루프 스레드 (TOSS API 429 에러 방지)
         """
         while self.is_running:
             self.fetch_live_data()
             
-            # 5초 카운트다운 매초 갱신
-            for sec in range(5, 0, -1):
+            # 60초 카운트다운 매초 갱신
+            for sec in range(60, 0, -1):
                 if not self.is_running:
                     return
                 self.var_countdown.set(f"⏱️ 자동 갱신: {sec}초 전")
@@ -398,7 +398,60 @@ class LiveDashboardApp:
 
         # 제목
         lbl_title = tk.Label(popup, text="🚀 퀀트 분석 및 포트폴리오 리밸런싱 결과", font=("Malgun Gothic", 16, "bold"), fg="#3B82F6", bg="#0F172A")
-        lbl_title.pack(pady=15)
+        lbl_title.pack(pady=(15, 5))
+
+        # 시장 영업 시간 및 주문 방식 요약 프레임
+        def is_us_market_open():
+            import datetime
+            now = datetime.datetime.now() # KST
+            weekday = now.weekday()
+            if weekday == 5 and now.hour >= 6:
+                return False
+            if weekday == 6:
+                return False
+            if weekday == 0 and now.hour < 9:
+                return False
+            hour = now.hour
+            minute = now.minute
+            if hour == 22 and minute >= 30:
+                return True
+            if hour >= 23:
+                return True
+            if hour < 6:
+                return True
+            return False
+
+        def is_kr_market_open():
+            import datetime
+            now = datetime.datetime.now()
+            weekday = now.weekday()
+            if weekday >= 5:
+                return False
+            hour = now.hour
+            minute = now.minute
+            if 9 <= hour < 15:
+                return True
+            if hour == 15 and minute <= 30:
+                return True
+            return False
+
+        kr_open = is_kr_market_open()
+        us_open = is_us_market_open()
+        kr_status_text = "🟢 한국시장 영업중 (실시간 체결 가능)" if kr_open else "🔴 한국시장 휴장중 (주문 전송 시 건너뜀)"
+        us_status_text = "🟢 미국시장 영업중 (실시간 체결 가능)" if us_open else "🔴 미국시장 휴장중 (주문 전송 시 건너뜀)"
+
+        summary_frame = tk.Frame(popup, bg="#1E293B", bd=1, relief="solid", highlightthickness=0)
+        summary_frame.pack(fill="x", padx=20, pady=5)
+
+        lbl_summary_title = tk.Label(summary_frame, text="💡 시장 개장 및 자금 분배 안내", font=("Malgun Gothic", 10, "bold"), fg="#94A3B8", bg="#1E293B")
+        lbl_summary_title.pack(anchor="w", padx=15, pady=(8, 2))
+
+        status_text = f"국내 주식: {kr_status_text}  |  미국 주식: {us_status_text}\n" \
+                      f"각 주식에 들어갈 개별 투자 금액은 하단 표의 'Invest_Amount(KRW)'(포트폴리오) 및 'Diff_Value(KRW)'(주문서)에서 직접 확인 가능합니다.\n" \
+                      f"※ 시장이 휴장 상태인 종목 주문은 실제 토스 전송 시 안전하게 건너뜁니다. (개장 시간에 맞추어 주문 전송을 실행해 주세요)"
+
+        lbl_status_desc = tk.Label(summary_frame, text=status_text, font=("Malgun Gothic", 9), fg="#E2E8F0", bg="#1E293B", justify="left")
+        lbl_status_desc.pack(anchor="w", padx=15, pady=(0, 8))
 
         # 탭 역할을 할 프레임
         tab_control = ttk.Notebook(popup)
