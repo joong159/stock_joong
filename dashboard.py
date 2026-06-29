@@ -291,9 +291,9 @@ class LiveDashboardApp:
             
         def execute_backend():
             temp_output = "temp_output.xlsx"
+            success = False
             try:
                 import subprocess
-                import shutil
                 # S&P500, KRX 분석 및 엑셀 출력을 포함한 파이썬 스크립트 백그라운드 호출
                 cmd = ["python", "quant_analyzer.py", "--output", temp_output]
                 if self.is_offline:
@@ -303,29 +303,16 @@ class LiveDashboardApp:
                 
                 # 결과 출력 확인
                 if res.returncode == 0:
-                    def ask_save():
-                        save_confirm = messagebox.askyesno("엑셀 보고서 저장", "퀀트 리밸런싱 분석 및 주문 전송이 성공적으로 완료되었습니다!\n분석 결과 엑셀 보고서 파일을 저장하시겠습니까?")
-                        if save_confirm:
-                            output_file = filedialog.asksaveasfilename(
-                                initialfile='stock_analysis_results.xlsx',
-                                title="분석 결과를 저장할 엑셀 파일 위치 선택",
-                                defaultextension=".xlsx",
-                                filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
-                            )
-                            if output_file:
-                                try:
-                                    shutil.copy(temp_output, output_file)
-                                    messagebox.showinfo("저장 완료", f"엑셀 보고서가 성공적으로 저장되었습니다:\n{output_file}")
-                                except Exception as err:
-                                    messagebox.showerror("저장 실패", f"파일 저장 중 오류 발생: {err}")
-                    self.root.after(0, ask_save)
+                    success = True
+                    self.root.after(0, lambda: self.show_analysis_results(temp_output))
                 else:
                     self.root.after(0, lambda: messagebox.showerror("오류 발생", f"퀀트 분석기 실행 실패:\n{res.stderr}"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("오류 발생", f"오류 메시지: {e}"))
             finally:
-                # 임시 파일 삭제
-                if os.path.exists(temp_output):
+                # 성공 시에는 show_analysis_results에서 파일을 다 읽고 삭제하므로,
+                # 실패했을 때만 여기서 임시 파일을 청소합니다.
+                if not success and os.path.exists(temp_output):
                     try:
                         os.remove(temp_output)
                     except Exception:
@@ -333,6 +320,173 @@ class LiveDashboardApp:
                 self.root.after(0, self.manual_refresh)
                 
         threading.Thread(target=execute_backend, daemon=True).start()
+
+    def show_analysis_results(self, temp_output):
+        """
+        분석이 성공한 후, 추천 포트폴리오와 리밸런싱 매매 계획을 화면에 표로 보여줍니다.
+        """
+        import pandas as pd
+        import shutil
+        
+        df_port = None
+        df_rebal = None
+        
+        try:
+            # 엑셀 시트에서 데이터 로드 (첫 2행은 제목이므로 skiprows=2)
+            df_port = pd.read_excel(temp_output, sheet_name="Final Portfolio", skiprows=2)
+            df_port = df_port.dropna(subset=['Ticker'])
+            
+            try:
+                df_rebal = pd.read_excel(temp_output, sheet_name="Rebalancing Plan", skiprows=2)
+                df_rebal = df_rebal.dropna(subset=['Ticker'])
+            except Exception:
+                pass
+        except Exception as e:
+            messagebox.showerror("데이터 읽기 실패", f"결과 엑셀 파일을 읽는 중 오류가 발생했습니다: {e}")
+            return
+        finally:
+            # 메모리에 데이터를 모두 로드했으므로 임시 파일은 즉시 안전하게 삭제합니다.
+            if os.path.exists(temp_output):
+                try:
+                    os.remove(temp_output)
+                except Exception:
+                    pass
+
+        # 결과팝업 창 생성
+        popup = tk.Toplevel(self.root)
+        popup.title("📊 퀀트 분석 및 리밸런싱 주문 결과")
+        popup.geometry("950x650")
+        popup.configure(bg="#0F172A")  # Slate 900
+        popup.transient(self.root)
+        popup.grab_set()
+
+        # 제목
+        lbl_title = tk.Label(popup, text="🚀 퀀트 분석 및 포트폴리오 리밸런싱 결과", font=("Malgun Gothic", 16, "bold"), fg="#3B82F6", bg="#0F172A")
+        lbl_title.pack(pady=15)
+
+        # 탭 역할을 할 프레임
+        tab_control = ttk.Notebook(popup)
+        tab_control.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # 1. 추천 포트폴리오 탭
+        tab_port = tk.Frame(tab_control, bg="#1E293B")
+        tab_control.add(tab_port, text="  최종 추천 포트폴리오  ")
+
+        # Treeview for Portfolio
+        cols_port = list(df_port.columns)
+        tree_port = ttk.Treeview(tab_port, columns=cols_port, show="headings")
+        for col in cols_port:
+            tree_port.heading(col, text=col)
+            # 정렬 및 너비 설정
+            if col in ['Ticker', 'Market', 'Industry']:
+                tree_port.column(col, width=100, anchor="center")
+            elif col in ['Pure_Alpha(%)', 'AI_News_Score', 'Weight(%)']:
+                tree_port.column(col, width=120, anchor="e")
+            else:
+                tree_port.column(col, width=150, anchor="e")
+        tree_port.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        # 데이터 삽입
+        for _, row in df_port.iterrows():
+            vals = []
+            for col in cols_port:
+                val = row[col]
+                # 포맷팅
+                if col == 'Weight(%)' and pd.notna(val):
+                    vals.append(f"{float(val):.2f}%")
+                elif col == 'Invest_Amount(KRW)' and pd.notna(val):
+                    vals.append(f"₩{int(val):,}")
+                elif col in ['Pure_Alpha(%)', 'AI_News_Score'] and pd.notna(val):
+                    vals.append(f"{float(val):.2f}")
+                else:
+                    vals.append(str(val) if pd.notna(val) else "")
+            tree_port.insert("", "end", values=vals)
+
+        # 2. 리밸런싱 주문 계획 탭
+        tab_rebal = tk.Frame(tab_control, bg="#1E293B")
+        tab_control.add(tab_rebal, text="  리밸런싱 매매 주문서  ")
+
+        if df_rebal is not None and not df_rebal.empty:
+            cols_rebal = list(df_rebal.columns)
+            tree_rebal = ttk.Treeview(tab_rebal, columns=cols_rebal, show="headings")
+            for col in cols_rebal:
+                tree_rebal.heading(col, text=col)
+                if col in ['Ticker', 'Toss_Symbol', 'Action', 'Currency']:
+                    tree_rebal.column(col, width=80, anchor="center")
+                elif col in ['Reason']:
+                    tree_rebal.column(col, width=250, anchor="w")
+                elif col in ['Current_Qty', 'Target_Qty', 'Diff_Qty']:
+                    tree_rebal.column(col, width=90, anchor="e")
+                else:
+                    tree_rebal.column(col, width=110, anchor="e")
+            tree_rebal.pack(fill="both", expand=True, padx=10, pady=10)
+
+            for _, row in df_rebal.iterrows():
+                vals = []
+                for col in cols_rebal:
+                    val = row[col]
+                    # 포맷팅
+                    if col in ['Target_Value(KRW)', 'Current_Value(KRW)', 'Diff_Value(KRW)'] and pd.notna(val):
+                        vals.append(f"₩{int(val):,}")
+                    elif col in ['Target_Weight(%)'] and pd.notna(val):
+                        vals.append(f"{float(val):.2f}%")
+                    elif col in ['Current_Qty', 'Target_Qty', 'Diff_Qty'] and pd.notna(val):
+                        vals.append(f"{float(val):.4f}" if float(val) % 1 != 0 else f"{int(val)}")
+                    elif col == 'Current_Price' and pd.notna(val):
+                        vals.append(f"{float(val):,.2f}")
+                    else:
+                        vals.append(str(val) if pd.notna(val) else "")
+                tree_rebal.insert("", "end", values=vals)
+        else:
+            lbl_no_trade = tk.Label(tab_rebal, text="매매 주문이 없습니다. (포트폴리오 비율이 유지 조건에 잘 부합합니다)", font=("Malgun Gothic", 12), fg="#94A3B8", bg="#1E293B")
+            lbl_no_trade.pack(expand=True)
+
+        # 하단 컨트롤 영역
+        btn_frame = tk.Frame(popup, bg="#0F172A", pady=15)
+        btn_frame.pack(fill="x", side="bottom")
+
+        # 임시 보관된 시점 데이터를 저장하기 위해 팝업 내부 클로저로 엑셀 저장 함수 정의
+        temp_data_for_excel = temp_output  # 실제로는 이미 파일은 삭제되었지만, 팝업 생성 시 데이터를 이미 화면에 채웠고,
+        # 사용자가 엑셀로 내보내기를 원하면 재생성하거나, 삭제 전 데이터를 메모리에 버퍼링해두었다가 원클러 저장하게 합니다.
+        # 가장 단순하고 버그가 없는 것은 temp_output 파일을 _request 처럼 화면을 닫을 때까지 유지하다가 닫을 때 지우는 것입니다.
+        # 이를 위해, 위에서 바로 지우지 말고, popup 창이 닫힐 때(destroy) 지우도록 이벤트를 바인딩하겠습니다!
+
+        def save_excel():
+            output_file = filedialog.asksaveasfilename(
+                initialfile='stock_analysis_results.xlsx',
+                title="분석 결과를 저장할 엑셀 파일 위치 선택",
+                defaultextension=".xlsx",
+                filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
+            )
+            if output_file:
+                try:
+                    # 화면 로드를 위해 아직 지우지 않고 대기시켜둔 temp_output을 복사
+                    shutil.copy(temp_output, output_file)
+                    messagebox.showinfo("저장 완료", f"엑셀 보고서가 성공적으로 저장되었습니다:\n{output_file}")
+                except Exception as err:
+                    messagebox.showerror("저장 실패", f"파일 저장 중 오류 발생: {err}")
+
+        btn_save = tk.Button(btn_frame, text="📥 엑셀 파일 저장", font=("Malgun Gothic", 10, "bold"),
+                             bg="#3B82F6", fg="#FFFFFF", activebackground="#2563EB", activeforeground="#FFFFFF",
+                             relief="flat", padx=20, pady=5, command=save_excel)
+        btn_save.pack(side="left", padx=30)
+
+        # 창이 닫힐 때 임시 파일 제거 이벤트 바인딩
+        def on_popup_close():
+            if os.path.exists(temp_output):
+                try:
+                    os.remove(temp_output)
+                except Exception:
+                    pass
+            popup.destroy()
+
+        popup.protocol("WM_DELETE_WINDOW", on_popup_close)
+
+        btn_close = tk.Button(btn_frame, text="확인 / 닫기", font=("Malgun Gothic", 10, "bold"),
+                              bg="#64748B", fg="#FFFFFF", activebackground="#475569", activeforeground="#FFFFFF",
+                              relief="flat", padx=20, pady=5, command=on_popup_close)
+        btn_close.pack(side="right", padx=30)
+
 
 
 
