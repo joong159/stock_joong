@@ -609,7 +609,8 @@ class LiveDashboardApp:
             for _, row in df_sorted.iterrows():
                 market = row.get('Market', '')
                 ticker = row.get('Ticker', '')
-                is_us = 'SP500' in str(market) or not (str(ticker).endswith('.KS') or str(ticker).endswith('.KQ'))
+                ticker_str = str(ticker)
+                is_us = 'SP500' in str(market) or not (ticker_str.isdigit() or ticker_str.endswith('.KS') or ticker_str.endswith('.KQ'))
                 if is_us:
                     colors.append('#2563EB') # Blue
                 else:
@@ -784,7 +785,8 @@ class LiveDashboardApp:
             # 필터링 대상 주문 확인 (t_name.endswith('.KS') or t_name.endswith('.KQ') => 한국 주식)
             filtered_orders = []
             for t_name, row in df_rebal.iterrows():
-                is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
+                t_name_str = str(t_name)
+                is_us = not (t_name_str.isdigit() or t_name_str.endswith('.KS') or t_name_str.endswith('.KQ'))
                 if market_filter == 'KRX' and not is_us:
                     filtered_orders.append(t_name)
                 elif market_filter == 'SP500' and is_us:
