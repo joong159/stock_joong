@@ -113,7 +113,7 @@ def update_cached_financials(ticker, info, cache):
 
 def print_banner():
     # CP949 인코딩 호환성을 위해 표준 ASCII 문자만 사용하는 안전한 배너 디자인
-    banner = f"""
+    banner = fr"""
 {Colors.BLUE}================================================================
   ___                 _       ___   ___
  / _ \ _  _ __ _ _ _ | |_    |_  ) / _ \\
