@@ -139,7 +139,15 @@ class LiveDashboardApp:
         table_frame = tk.Frame(self.root, bg="#0F172A")
         table_frame.pack(fill="both", expand=True, padx=30, pady=5)
         
-        self.tree = ttk.Treeview(table_frame, columns=("Symbol", "Name", "Qty", "Price", "Value", "Currency"), show="headings")
+        # 좌우 분할 프레임
+        table_left_frame = tk.Frame(table_frame, bg="#0F172A")
+        table_left_frame.pack(side="left", fill="both", expand=True)
+        
+        table_right_frame = tk.Frame(table_frame, bg="#0F172A")
+        table_right_frame.pack(side="right", fill="both", expand=True, padx=(15, 0))
+        self.current_pie_frame = table_right_frame
+        
+        self.tree = ttk.Treeview(table_left_frame, columns=("Symbol", "Name", "Qty", "Price", "Value", "Currency"), show="headings")
         self.tree.heading("Symbol", text="종목 코드")
         self.tree.heading("Name", text="회사명")
         self.tree.heading("Qty", text="보유 수량")
@@ -147,15 +155,15 @@ class LiveDashboardApp:
         self.tree.heading("Value", text="평가 금액(원화)")
         self.tree.heading("Currency", text="통화")
         
-        self.tree.column("Symbol", width=100, anchor="center")
-        self.tree.column("Name", width=180, anchor="w")
-        self.tree.column("Qty", width=100, anchor="e")
-        self.tree.column("Price", width=120, anchor="e")
-        self.tree.column("Value", width=150, anchor="e")
-        self.tree.column("Currency", width=80, anchor="center")
+        self.tree.column("Symbol", width=90, anchor="center")
+        self.tree.column("Name", width=140, anchor="w")
+        self.tree.column("Qty", width=80, anchor="e")
+        self.tree.column("Price", width=100, anchor="e")
+        self.tree.column("Value", width=120, anchor="e")
+        self.tree.column("Currency", width=70, anchor="center")
         self.tree.pack(fill="both", expand=True, side="left")
         
-        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.tree.yview)
+        scrollbar = ttk.Scrollbar(table_left_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         scrollbar.pack(fill="y", side="right")
         
@@ -293,6 +301,83 @@ class LiveDashboardApp:
             
             self.tree.insert("", "end", values=(sym, name, qty_str, price_str, val_str, curr))
             
+        self.draw_current_holdings_pie(holdings_list)
+        
+    def draw_current_holdings_pie(self, holdings_list):
+        # 기존 차트 위젯들 제거
+        for widget in self.current_pie_frame.winfo_children():
+            widget.destroy()
+            
+        if not holdings_list:
+            lbl_no_data = tk.Label(self.current_pie_frame, text="보유 주식이 없습니다.", font=("Malgun Gothic", 10), fg="#94A3B8", bg="#0F172A")
+            lbl_no_data.pack(expand=True)
+            return
+            
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg")
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import matplotlib.pyplot as plt
+            import matplotlib.font_manager as fm
+            
+            # 한글 깨짐 방지 폰트 설정
+            font_path = "C:/Windows/Fonts/malgun.ttf"
+            if os.path.exists(font_path):
+                font_name = fm.FontProperties(fname=font_path).get_name()
+                matplotlib.rc('font', family=font_name)
+            else:
+                matplotlib.rc('font', family='Malgun Gothic')
+                
+            fig, ax = plt.subplots(figsize=(3.5, 3.5), dpi=100)
+            fig.patch.set_facecolor('#0F172A') # Slate 900 매칭
+            ax.set_facecolor('#0F172A')
+            
+            labels = []
+            sizes = []
+            colors = []
+            
+            for h in holdings_list:
+                sym, name, qty, price, val, curr = h
+                labels.append(name)
+                sizes.append(val)
+                if curr == "USD":
+                    colors.append('#2563EB') # Blue for US
+                else:
+                    colors.append('#059669') # Emerald for KR
+                    
+            if sum(sizes) == 0:
+                plt.close(fig)
+                lbl_no_val = tk.Label(self.current_pie_frame, text="평가 금액이 0원입니다.", font=("Malgun Gothic", 10), fg="#94A3B8", bg="#0F172A")
+                lbl_no_val.pack(expand=True)
+                return
+                
+            wedges, texts, autotexts = ax.pie(
+                sizes,
+                labels=labels,
+                autopct='%1.1f%%',
+                startangle=140,
+                colors=colors,
+                textprops=dict(color="white", fontsize=8),
+                pctdistance=0.7
+            )
+            
+            for autotext in autotexts:
+                autotext.set_color('white')
+                autotext.set_fontsize(8)
+                autotext.set_weight('bold')
+            for text in texts:
+                text.set_color('#E2E8F0')
+                text.set_fontsize(8)
+                
+            ax.axis('equal')
+            
+            canvas = FigureCanvasTkAgg(fig, master=self.current_pie_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            plt.close(fig)
+        except Exception as e:
+            print(f"[CURRENT PIE ERROR] {e}")
+            
     def show_error_message(self, err_msg):
         self.var_countdown.set("⚠️ 통신 에러 발생")
         print(f"[DASHBOARD ERROR] {err_msg}")
@@ -335,14 +420,25 @@ class LiveDashboardApp:
                 if self.is_offline:
                     cmd.append("--test") # 오프라인 모드일 땐 가볍게 11개 대형주 테스트 유니버스로 실행
                     
-                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                res = subprocess.run(cmd, capture_output=True)
+                
+                def decode_bytes(b):
+                    for enc in ['utf-8', 'cp949', 'euc-kr']:
+                        try:
+                            return b.decode(enc)
+                        except UnicodeDecodeError:
+                            continue
+                    return b.decode('utf-8', errors='replace')
+                    
+                stdout_text = decode_bytes(res.stdout)
+                stderr_text = decode_bytes(res.stderr)
                 
                 # 결과 출력 확인
                 if res.returncode == 0:
                     success = True
                     self.root.after(0, lambda: self.show_analysis_results(temp_output))
                 else:
-                    self.root.after(0, lambda: messagebox.showerror("오류 발생", f"퀀트 분석기 실행 실패:\n{res.stderr}"))
+                    self.root.after(0, lambda: messagebox.showerror("오류 발생", f"퀀트 분석기 실행 실패:\n{stderr_text}"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("오류 발생", f"오류 메시지: {e}"))
             finally:
@@ -698,7 +794,18 @@ class LiveDashboardApp:
                     if self.is_offline:
                         cmd.append("--test")
                         
-                    res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+                    res = subprocess.run(cmd, capture_output=True)
+                    
+                    def decode_bytes(b):
+                        for enc in ['utf-8', 'cp949', 'euc-kr']:
+                            try:
+                                return b.decode(enc)
+                            except UnicodeDecodeError:
+                                continue
+                        return b.decode('utf-8', errors='replace')
+                        
+                    stdout_text = decode_bytes(res.stdout)
+                    stderr_text = decode_bytes(res.stderr)
                     
                     if os.path.exists("temp_exec_output.xlsx"):
                         try:
@@ -707,7 +814,7 @@ class LiveDashboardApp:
                             pass
                             
                     # 실행 결과 로그 창을 팝업
-                    self.root.after(0, lambda: show_execution_log_popup(res.stdout, res.stderr))
+                    self.root.after(0, lambda: show_execution_log_popup(stdout_text, stderr_text))
                     
                     if res.returncode == 0:
                         self.root.after(0, lambda: btn_execute.config(text="✅ 전송 완료"))
