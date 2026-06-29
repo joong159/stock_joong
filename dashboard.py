@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 import threading
 import time
 import os
@@ -289,11 +289,22 @@ class LiveDashboardApp:
             self.manual_refresh()
             return
             
+        # 메인 GUI 스레드에서 파일 저장 대화상자 안전하게 띄우기
+        output_file = filedialog.asksaveasfilename(
+            initialfile='stock_analysis_results.xlsx',
+            title="분석 결과를 저장할 엑셀 파일 위치 선택",
+            defaultextension=".xlsx",
+            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
+        )
+        if not output_file:
+            self.manual_refresh()
+            return
+            
         def execute_backend():
             try:
                 import subprocess
                 # S&P500, KRX 분석 및 엑셀 출력을 포함한 파이썬 스크립트 백그라운드 호출
-                cmd = ["python", "quant_analyzer.py"]
+                cmd = ["python", "quant_analyzer.py", "--output", output_file]
                 if self.is_offline:
                     cmd.append("--test") # 오프라인 모드일 땐 가볍게 11개 대형주 테스트 유니버스로 실행
                     
@@ -310,6 +321,7 @@ class LiveDashboardApp:
                 self.root.after(0, self.manual_refresh)
                 
         threading.Thread(target=execute_backend, daemon=True).start()
+
 
 if __name__ == "__main__":
     root = tk.Tk()

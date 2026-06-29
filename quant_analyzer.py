@@ -1172,7 +1172,7 @@ if __name__ == "__main__":
                             # 0. 기존 미체결/예약 주문 취소
                             log_info("0단계: 기존 대기 중인 예약/미체결 주문 취소 검토 중...")
                             try:
-                                pending_orders = toss_client.get_orders(status="PENDING")
+                                pending_orders = toss_client.get_orders(status="OPEN")
                                 if pending_orders:
                                     log_info(f"조회된 대기 주문 수: {len(pending_orders)}개")
                                     # 리밸런싱 대상이거나 분석 대상 유니버스에 속한 종목의 대기 주문을 취소합니다.

@@ -184,10 +184,10 @@ class TossinvestClient:
             except Exception:
                 raise Exception(str(e))
 
-    def get_orders(self, status="PENDING"):
+    def get_orders(self, status="OPEN"):
         """
         주문 목록을 조회합니다.
-        - status: 'PENDING' (미체결/대기), 'COMPLETED' (체결완료), 'CANCELLED' (취소) 등 (기본값: 'PENDING')
+        - status: 'OPEN' (미체결/대기), 'CLOSED' (체결완료/취소) 등 (기본값: 'OPEN')
         """
         url = f"{self.base_url}/api/v1/orders"
         params = {}
@@ -197,7 +197,7 @@ class TossinvestClient:
             res = requests.get(url, headers=self.get_headers(require_account=True), params=params, timeout=10)
             res.raise_for_status()
             res_json = res.json()
-            return res_json.get("result", [])
+            return res_json.get("result", {}).get("orders", [])
         except Exception as e:
             print(f"[TOSS API WARNING] 주문 목록 조회 실패: {e}")
             return []
@@ -206,12 +206,15 @@ class TossinvestClient:
         """
         특정 대기 중인 주문을 취소합니다.
         """
-        url = f"{self.base_url}/api/v1/orders/{order_id}"
+        url = f"{self.base_url}/api/v1/orders/{order_id}/cancel"
+        headers = self.get_headers(require_account=True)
+        headers["Content-Type"] = "application/json"
         try:
-            res = requests.delete(url, headers=self.get_headers(require_account=True), timeout=10)
+            res = requests.post(url, headers=headers, json={}, timeout=10)
             res.raise_for_status()
             return res.json().get("result", {})
         except Exception as e:
             print(f"[TOSS API WARNING] 주문 취소 실패 (주문번호 {order_id}): {e}")
             return {}
+
 
