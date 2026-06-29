@@ -308,7 +308,7 @@ class LiveDashboardApp:
                 if self.is_offline:
                     cmd.append("--test") # 오프라인 모드일 땐 가볍게 11개 대형주 테스트 유니버스로 실행
                     
-                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
+                res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
                 
                 # 결과 출력 확인
                 if res.returncode == 0:
