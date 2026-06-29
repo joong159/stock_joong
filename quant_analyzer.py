@@ -1344,21 +1344,24 @@ if __name__ == "__main__":
                 # 윈도우(GUI) 탐색기를 띄워 저장할 폴더 및 파일명 설정
                 output_filename = args_cli.output
                 if not output_filename:
-                    try:
-                        root = tk.Tk()
-                        root.withdraw() # 메인 창 숨기기
-                        root.attributes('-topmost', True) # 창을 항상 위로 유지
-                        
-                        log_info("엑셀 파일을 저장할 위치를 선택해 주세요...")
-                        output_filename = filedialog.asksaveasfilename(
-                            initialfile='stock_analysis_results.xlsx',
-                            title="분석 결과를 저장할 엑셀 파일 위치 선택",
-                            defaultextension=".xlsx",
-                            filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
-                        )
-                    except Exception as ex:
-                        log_warn(f"GUI 환경 탐색기를 실행할 수 없으므로 기본 파일명으로 대체합니다. ({ex})")
+                    if args_cli.execute:
                         output_filename = 'stock_analysis_results.xlsx'
+                    else:
+                        try:
+                            root = tk.Tk()
+                            root.withdraw() # 메인 창 숨기기
+                            root.attributes('-topmost', True) # 창을 항상 위로 유지
+                            
+                            log_info("엑셀 파일을 저장할 위치를 선택해 주세요...")
+                            output_filename = filedialog.asksaveasfilename(
+                                initialfile='stock_analysis_results.xlsx',
+                                title="분석 결과를 저장할 엑셀 파일 위치 선택",
+                                defaultextension=".xlsx",
+                                filetypes=[("Excel Files", "*.xlsx"), ("All Files", "*.*")]
+                            )
+                        except Exception as ex:
+                            log_warn(f"GUI 환경 탐색기를 실행할 수 없으므로 기본 파일명으로 대체합니다. ({ex})")
+                            output_filename = 'stock_analysis_results.xlsx'
                 
                 if not output_filename:
                     output_filename = 'stock_analysis_results.xlsx'

@@ -468,14 +468,82 @@ class LiveDashboardApp:
             tree_port.heading(col, text=col)
             # 정렬 및 너비 설정
             if col in ['Ticker', 'Market', 'Industry']:
-                tree_port.column(col, width=90, anchor="center")
+                tree_port.column(col, width=80, anchor="center")
             elif col == 'Name':
-                tree_port.column(col, width=150, anchor="w")
+                tree_port.column(col, width=120, anchor="w")
             elif col in ['Pure_Alpha(%)', 'AI_News_Score', 'Weight(%)']:
-                tree_port.column(col, width=100, anchor="e")
+                tree_port.column(col, width=90, anchor="e")
             else:
-                tree_port.column(col, width=130, anchor="e")
-        tree_port.pack(fill="both", expand=True, padx=10, pady=10)
+                tree_port.column(col, width=110, anchor="e")
+        tree_port.pack(side="left", fill="both", expand=True, padx=10, pady=10)
+
+        # 원형 그래프 (Matplotlib) 그리기 및 임베드
+        try:
+            import matplotlib
+            matplotlib.use("TkAgg")
+            from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+            import matplotlib.pyplot as plt
+            import matplotlib.font_manager as fm
+            
+            # 한글 깨짐 방지 폰트 설정
+            font_path = "C:/Windows/Fonts/malgun.ttf"
+            if os.path.exists(font_path):
+                font_name = fm.FontProperties(fname=font_path).get_name()
+                matplotlib.rc('font', family=font_name)
+            else:
+                matplotlib.rc('font', family='Malgun Gothic')
+                
+            fig, ax = plt.subplots(figsize=(4.0, 4.0), dpi=100)
+            fig.patch.set_facecolor('#1E293B')
+            ax.set_facecolor('#1E293B')
+            
+            df_sorted = df_port.sort_values(by='Weight(%)', ascending=False)
+            labels = df_sorted['Name'].tolist()
+            sizes = df_sorted['Weight(%)'].tolist()
+            
+            # 미국 주식은 파란색 계열, 한국 주식은 초록색 계열로 칠함
+            colors = []
+            for _, row in df_sorted.iterrows():
+                market = row.get('Market', '')
+                ticker = row.get('Ticker', '')
+                is_us = 'SP500' in str(market) or not (str(ticker).endswith('.KS') or str(ticker).endswith('.KQ'))
+                if is_us:
+                    colors.append('#2563EB') # Blue
+                else:
+                    colors.append('#059669') # Emerald
+                    
+            wedges, texts, autotexts = ax.pie(
+                sizes,
+                labels=labels,
+                autopct='%1.1f%%',
+                startangle=140,
+                colors=colors,
+                textprops=dict(color="white", fontsize=8),
+                pctdistance=0.7
+            )
+            
+            # 텍스트 스타일링
+            for autotext in autotexts:
+                autotext.set_color('white')
+                autotext.set_fontsize(8)
+                autotext.set_weight('bold')
+            for text in texts:
+                text.set_color('#E2E8F0')
+                text.set_fontsize(8)
+                
+            ax.axis('equal')
+            
+            canvas_frame = tk.Frame(tab_port, bg="#1E293B")
+            canvas_frame.pack(side="right", fill="both", expand=False, padx=10, pady=10)
+            
+            canvas = FigureCanvasTkAgg(fig, master=canvas_frame)
+            canvas.draw()
+            canvas.get_tk_widget().pack(fill="both", expand=True)
+            plt.close(fig)
+        except Exception as e:
+            print(f"[PIE CHART ERROR] {e}")
+            # 차트 렌더링 실패 시 테이블을 가득 채움
+            tree_port.pack_configure(side="left", fill="both", expand=True)
         
         # 데이터 삽입
         for _, row in df_port.iterrows():
@@ -579,13 +647,19 @@ class LiveDashboardApp:
             def execute_real_orders_bg():
                 try:
                     import subprocess
-                    # --execute 인자를 주어 실 계좌 주문을 구동시킴
-                    cmd = ["python", "quant_analyzer.py", "--execute"]
+                    # --execute 인자를 주어 실 계좌 주문을 구동시킴 (대화상자 팝업 방지를 위해 임시 출력 파일 지정)
+                    cmd = ["python", "quant_analyzer.py", "--execute", "--output", "temp_exec_output.xlsx"]
                     if self.is_offline:
                         cmd.append("--test")
                         
                     res = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
                     
+                    if os.path.exists("temp_exec_output.xlsx"):
+                        try:
+                            os.remove("temp_exec_output.xlsx")
+                        except Exception:
+                            pass
+                            
                     if res.returncode == 0:
                         self.root.after(0, lambda: messagebox.showinfo("주문 전송 완료", "토스증권 Open API 실계좌 리밸런싱 주문 전송이 안전하게 완료되었습니다!\n상세 체결 정보는 대시보드 화면 및 토스증권 앱을 확인해 주세요."))
                         self.root.after(0, lambda: btn_execute.config(text="✅ 주문 완료"))
