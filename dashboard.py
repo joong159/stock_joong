@@ -776,21 +776,37 @@ class LiveDashboardApp:
             btn_close.pack(pady=15)
 
         # 실제 토스 계좌 주문 전송 함수
-        def send_real_orders():
+        def send_real_orders(market_filter):
             if df_rebal is None or df_rebal.empty:
                 messagebox.showinfo("주문 대상 없음", "분석 결과 전송할 매매 리밸런싱 주문이 존재하지 않습니다.")
                 return
                 
-            confirm = messagebox.askyesno("⚠️ 실계좌 매매 전송", "정말로 토스증권 Open API를 통해 실제 계좌 매매 주문(시장가)을 보내시겠습니까?\n이 작업은 즉시 실제 주식 거래로 체결됩니다!")
+            # 필터링 대상 주문 확인 (t_name.endswith('.KS') or t_name.endswith('.KQ') => 한국 주식)
+            filtered_orders = []
+            for t_name, row in df_rebal.iterrows():
+                is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
+                if market_filter == 'KRX' and not is_us:
+                    filtered_orders.append(t_name)
+                elif market_filter == 'SP500' and is_us:
+                    filtered_orders.append(t_name)
+                    
+            if not filtered_orders:
+                market_name = "한국 주식(국장)" if market_filter == 'KRX' else "미국 주식(미장)"
+                messagebox.showinfo("주문 대상 없음", f"전송 대상인 {market_name} 리밸런싱 주문이 존재하지 않습니다.")
+                return
+                
+            market_msg = "한국 주식(국장)" if market_filter == 'KRX' else "미국 주식(미장)"
+            confirm = messagebox.askyesno("⚠️ 실계좌 매매 전송", f"정말로 토스증권 Open API를 통해 실제 {market_msg} 매매 주문(시장가)을 보내시겠습니까?\n이 작업은 즉시 실제 주식 거래로 체결됩니다!")
             if not confirm:
                 return
                 
-            btn_execute.config(state="disabled", text="⏳ 주문 전송 중...")
+            btn_execute = btn_execute_kr if market_filter == 'KRX' else btn_execute_us
+            btn_execute.config(state="disabled", text="⏳ 전송 중...")
             
             def execute_real_orders_bg():
                 try:
                     import subprocess
-                    cmd = ["python", "quant_analyzer.py", "--execute", "--output", "temp_exec_output.xlsx"]
+                    cmd = ["python", "quant_analyzer.py", "--execute", "--output", "temp_exec_output.xlsx", "--market-filter", market_filter]
                     if self.is_offline:
                         cmd.append("--test")
                         
@@ -819,20 +835,28 @@ class LiveDashboardApp:
                     if res.returncode == 0:
                         self.root.after(0, lambda: btn_execute.config(text="✅ 전송 완료"))
                     else:
-                        self.root.after(0, lambda: btn_execute.config(state="normal", text="🚀 실제 토스 주문 전송"))
+                        btn_text = "🚀 국장 주문 전송" if market_filter == 'KRX' else "🚀 미장 주문 전송"
+                        self.root.after(0, lambda: btn_execute.config(state="normal", text=btn_text))
                 except Exception as err:
                     self.root.after(0, lambda: messagebox.showerror("주문 실패", f"연동 프로세스 실행 실패: {err}"))
-                    self.root.after(0, lambda: btn_execute.config(state="normal", text="🚀 실제 토스 주문 전송"))
+                    btn_text = "🚀 국장 주문 전송" if market_filter == 'KRX' else "🚀 미장 주문 전송"
+                    self.root.after(0, lambda: btn_execute.config(state="normal", text=btn_text))
                 finally:
                     self.root.after(0, self.manual_refresh)
                     
             threading.Thread(target=execute_real_orders_bg, daemon=True).start()
 
-        # 실제 주문 전송 버튼
-        btn_execute = tk.Button(btn_frame, text="🚀 실제 토스 주문 전송", font=("Malgun Gothic", 10, "bold"),
-                                bg="#10B981", fg="#FFFFFF", activebackground="#059669", activeforeground="#FFFFFF",
-                                relief="flat", padx=15, pady=5, command=send_real_orders)
-        btn_execute.pack(side="left", padx=20)
+        # 실제 국장 주문 전송 버튼
+        btn_execute_kr = tk.Button(btn_frame, text="🚀 국장 주문 전송", font=("Malgun Gothic", 10, "bold"),
+                                   bg="#059669", fg="#FFFFFF", activebackground="#047857", activeforeground="#FFFFFF",
+                                   relief="flat", padx=15, pady=5, command=lambda: send_real_orders('KRX'))
+        btn_execute_kr.pack(side="left", padx=10)
+
+        # 실제 미장 주문 전송 버튼
+        btn_execute_us = tk.Button(btn_frame, text="🚀 미장 주문 전송", font=("Malgun Gothic", 10, "bold"),
+                                   bg="#2563EB", fg="#FFFFFF", activebackground="#1D4ED8", activeforeground="#FFFFFF",
+                                   relief="flat", padx=15, pady=5, command=lambda: send_real_orders('SP500'))
+        btn_execute_us.pack(side="left", padx=10)
 
         # 창이 닫힐 때 임시 파일 제거 이벤트 바인딩
         def on_popup_close():

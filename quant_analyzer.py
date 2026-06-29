@@ -753,6 +753,7 @@ if __name__ == "__main__":
     parser.add_argument('--no-cache', action='store_true', help="캐시를 사용하지 않고 새로 고침")
     parser.add_argument('--test', action='store_true', help="테스트용 소형 유니버스(11개 종목)로 실행")
     parser.add_argument('--execute', action='store_true', help="실제 토스증권 API를 호출하여 매매 주문을 실행")
+    parser.add_argument('--market-filter', choices=['KRX', 'SP500'], default=None, help="실행할 시장 필터 (KRX 또는 SP500)")
     args_cli = parser.parse_args()
     
     log_info("퀀트 분석을 시작합니다...")
@@ -1151,8 +1152,9 @@ if __name__ == "__main__":
                                 pass
                                 
                             if price_original > 0.0 and per_stock_budget_usd > 0.0:
-                                target_qty = int(per_stock_budget_usd / price_original)
-                                if target_qty > 0:
+                                # 미국 주식은 소수점(금액) 구매가 가능하므로 int() 제한 해제 (최소 1달러 이상 시 허용)
+                                target_qty = per_stock_budget_usd / price_original
+                                if target_qty > 0.0:
                                     rebal_data.append({
                                         "Ticker": ticker,
                                         "Name": ticker_desc_name,
@@ -1250,6 +1252,13 @@ if __name__ == "__main__":
                                         p_order_id = p_ord.get("orderId")
                                         
                                         is_us = not p_symbol.isdigit()
+                                        
+                                        # 시장 필터링 적용
+                                        if args_cli.market_filter == 'KRX' and is_us:
+                                            continue
+                                        if args_cli.market_filter == 'SP500' and not is_us:
+                                            continue
+                                            
                                         if is_us and not us_open:
                                             continue
                                         if not is_us and not kr_open:
@@ -1275,10 +1284,22 @@ if __name__ == "__main__":
                             sell_orders = df_rebal[df_rebal['Diff_Qty'] < 0]
                             for t_name, row in sell_orders.iterrows():
                                 sym = row['Toss_Symbol']
-                                qty = int(abs(row['Diff_Qty']))
-                                if qty <= 0: continue
-                                
                                 is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
+                                
+                                # 시장 필터링 적용
+                                if args_cli.market_filter == 'KRX' and is_us:
+                                    continue
+                                if args_cli.market_filter == 'SP500' and not is_us:
+                                    continue
+                                    
+                                if is_us:
+                                    # 미국 주식은 소수점 수량 매도 지원
+                                    qty = abs(float(row['Diff_Qty']))
+                                else:
+                                    qty = int(abs(row['Diff_Qty']))
+                                    
+                                if qty <= 0.0: continue
+                                
                                 if is_us and not us_open:
                                     log_warn(f"[{t_name}] 미국 시장이 휴장 상태이므로 매도 주문을 전송하지 않고 건너뜁니다. (미국 시장 개장 시간: 한국 시간 22:30 ~ 06:00)")
                                     continue
@@ -1298,10 +1319,14 @@ if __name__ == "__main__":
                             buy_orders = df_rebal[df_rebal['Diff_Qty'] > 0]
                             for t_name, row in buy_orders.iterrows():
                                 sym = row['Toss_Symbol']
-                                qty = int(row['Diff_Qty'])
-                                if qty <= 0: continue
-                                
                                 is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
+                                
+                                # 시장 필터링 적용
+                                if args_cli.market_filter == 'KRX' and is_us:
+                                    continue
+                                if args_cli.market_filter == 'SP500' and not is_us:
+                                    continue
+                                    
                                 if is_us and not us_open:
                                     log_warn(f"[{t_name}] 미국 시장이 휴장 상태이므로 매수 주문을 전송하지 않고 건너뜁니다. (미국 시장 개장 시간: 한국 시간 22:30 ~ 06:00)")
                                     continue
@@ -1309,10 +1334,22 @@ if __name__ == "__main__":
                                     log_warn(f"[{t_name}] 한국 시장이 휴장 상태이므로 매수 주문을 전송하지 않고 건너뜁니다. (한국 시장 개장 시간: 평일 09:00 ~ 15:30)")
                                     continue
                                     
-                                log_info(f"[{t_name}] 매수 주문 전송: {qty}주 (사유: {row['Reason']})")
                                 try:
-                                    res = toss_client.create_order(symbol=sym, side="BUY", quantity=qty, order_type="MARKET")
-                                    log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
+                                    if is_us:
+                                        # 미국 주식은 달러 기준 금액 매수 주문 (소수점 구매 실행)
+                                        val_usd = float(row.get('Diff_Value(KRW)', 0.0)) / usd_krw
+                                        if val_usd >= 1.0:
+                                            log_info(f"[{t_name}] 미국 소수점 금액 매수 주문 전송: ${val_usd:.2f} USD (사유: {row['Reason']})")
+                                            res = toss_client.create_order(symbol=sym, side="BUY", order_amount=round(val_usd, 2), order_type="MARKET")
+                                            log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
+                                        else:
+                                            log_warn(f"[{t_name}] 미국 주식 매수 예산(${val_usd:.2f})이 최소 기준인 $1.00 미만이어서 건너뜁니다.")
+                                    else:
+                                        qty = int(row['Diff_Qty'])
+                                        if qty > 0:
+                                            log_info(f"[{t_name}] 매수 주문 전송: {qty}주 (사유: {row['Reason']})")
+                                            res = toss_client.create_order(symbol=sym, side="BUY", quantity=qty, order_type="MARKET")
+                                            log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
                                 except Exception as e:
                                     log_error(f"[{t_name}] 매수 실패: {e}")
                                     
