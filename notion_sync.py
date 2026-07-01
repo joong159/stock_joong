@@ -275,3 +275,124 @@ def setup_notion_workspace():
             
     except Exception as e:
         return f"노션 자동 설정 중 오류 발생: {e}"
+
+def decorate_notion_workspace():
+    """
+    '주식 자동 리밸런싱 대시보드' 페이지의 아이콘, 커버 이미지, 소개글,
+    그리고 '투자 3대 절대 원칙' 콜아웃 박스를 추가하여 디자인을 아름답게 꾸밉니다.
+    """
+    if not NOTION_TOKEN:
+        return "Notion API 토큰이 설정되어 있지 않습니다."
+
+    # 1. 페이지 검색
+    url = "https://api.notion.com/v1/search"
+    payload = {
+        "query": "주식 자동 리밸런싱 대시보드",
+        "filter": {
+            "property": "object",
+            "value": "page"
+        }
+    }
+    
+    try:
+        res = requests.post(url, headers=HEADERS, json=payload, timeout=10)
+        if res.status_code != 200:
+            return f"페이지 검색 실패 (상태코드: {res.status_code})"
+            
+        results = res.json().get("results", [])
+        page_id = None
+        for page in results:
+            props = page.get("properties", {})
+            for prop_name, prop_val in props.items():
+                if prop_val.get("type") == "title":
+                    title_list = prop_val.get("title", [])
+                    page_title = "".join([t.get("plain_text", "") for t in title_list])
+                    if page_title.strip() == "주식 자동 리밸런싱 대시보드":
+                        page_id = page.get("id")
+                        break
+            if page_id:
+                break
+                
+        if not page_id:
+            return "노션에서 '주식 자동 리밸런싱 대시보드' 페이지를 찾을 수 없습니다."
+
+        # 2. 페이지 아이콘 및 커버 설정 (PATCH /v1/pages/{page_id})
+        page_url = f"https://api.notion.com/v1/pages/{page_id}"
+        page_payload = {
+            "icon": {
+                "type": "emoji",
+                "emoji": "📈"
+            },
+            "cover": {
+                "type": "external",
+                "external": {
+                    "url": "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=2070&auto=format&fit=crop"
+                }
+            }
+        }
+        requests.patch(page_url, headers=HEADERS, json=page_payload, timeout=10)
+
+        # 3. 기존에 추가된 블록 목록 조회하여 원칙 박스가 이미 있는지 검사
+        blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
+        b_res = requests.get(blocks_url, headers=HEADERS, timeout=10)
+        has_callout = False
+        if b_res.status_code == 200:
+            blocks = b_res.json().get("results", [])
+            for block in blocks:
+                if block.get("type") == "callout":
+                    has_callout = True
+                    break
+        
+        # 4. 원칙 콜아웃 박스 및 소개글 추가 (없을 경우에만)
+        if not has_callout:
+            children_payload = {
+                "children": [
+                    {
+                        "object": "block",
+                        "type": "heading_1",
+                        "heading_1": {
+                            "rich_text": [{"type": "text", "text": {"content": "📈 퀀트 포트폴리오 자동 리밸런싱 시스템"}}]
+                        }
+                    },
+                    {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [
+                                {
+                                    "type": "text", 
+                                    "text": {"content": "본 페이지는 토스증권 Open API 및 제미나이 AI와 실시간으로 연동되어 가동되는 자동화 자산 배분 관리 화면입니다. 아래의 보유 현황 및 거래 일지는 백그라운드 엔진에 의해 실시간으로 업데이트됩니다."}
+                                }
+                            ]
+                        }
+                    },
+                    {
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": [
+                                {
+                                    "type": "text",
+                                    "text": {
+                                        "content": "🛡️ 퀀트 투자 3대 절대 원칙\n1. 글로벌 자산 배분 비율 준수: 국장(한국 주식) 50% & 미장(미국 주식) 50% 비중 강제\n2. 샹들리에 추적 손절: Chandelier Exit 추적 손절라인 이탈 시 기계적으로 전량 시장가 즉시 매도\n3. AI 심리 피드백: 매 거래 발생 시 마다 매매 사유를 기입하고, 주기적으로 AI 자산진단을 수행하여 뇌동 매매를 방지"
+                                    }
+                                }
+                            ],
+                            "icon": {"type": "emoji", "emoji": "🛡️"},
+                            "color": "purple_background"
+                        }
+                    },
+                    {
+                        "object": "block",
+                        "type": "divider",
+                        "divider": {}
+                    }
+                ]
+            }
+            requests.patch(blocks_url, headers=HEADERS, json=children_payload, timeout=10)
+            return "노션 페이지 디자인 꾸미기(커버 설정, 아이콘 지정, 투자 원칙 콜아웃 박스 생성)가 완료되었습니다!"
+        else:
+            return "커버 이미지 및 아이콘이 갱신되었습니다. (소개글과 투자 원칙 박스는 이미 존재하여 유지만 되었습니다)"
+
+    except Exception as e:
+        return f"노션 디자인 꾸미기 중 오류 발생: {e}"

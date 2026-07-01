@@ -118,9 +118,19 @@ def generate_trading_analysis_report():
     for t in sorted_trades:
         # 날짜 포맷
         d = t['date'][:16].replace("T", " ") if t['date'] else "N/A"
+        
+        # Qty 포맷
+        qty_str = f"{t['qty']:.6f}" if t['qty'] % 1 != 0 else f"{int(t['qty'])}"
+        
+        # Price 포맷
+        is_us_ticker = t['symbol'].replace(".", "").isalpha()
+        if is_us_ticker:
+            price_str = f"${t['price']:,.2f}"
+        else:
+            price_str = f"₩{int(t['price']):,}"
+            
         trade_text_lines.append(
-            f"| {d} | {t['symbol']} | {t['side']} | {t['qty']:.6f if t['qty'] % 1 != 0 else int(t['qty'])} | "
-            f"{t['price']:,.2f if t['symbol'].isalpha() else int(t['price']):,} | {int(t['val_krw']):,}원 | {t['reason']} |"
+            f"| {d} | {t['symbol']} | {t['side']} | {qty_str} | {price_str} | {int(t['val_krw']):,}원 | {t['reason']} |"
         )
     
     trade_table_markdown = "\n".join(trade_text_lines)

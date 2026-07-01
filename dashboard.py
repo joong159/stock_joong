@@ -206,9 +206,10 @@ class LiveDashboardApp:
         
         def setup_bg():
             try:
-                from notion_sync import setup_notion_workspace
+                from notion_sync import setup_notion_workspace, decorate_notion_workspace
                 msg = setup_notion_workspace()
-                self.root.after(0, lambda: messagebox.showinfo("노션 설정 결과", msg))
+                dec_msg = decorate_notion_workspace()
+                self.root.after(0, lambda: messagebox.showinfo("노션 설정 결과", f"{msg}\n\n{dec_msg}"))
             except Exception as e:
                 self.root.after(0, lambda: messagebox.showerror("노션 설정 오류", f"작업 중 오류 발생: {e}"))
             finally:
