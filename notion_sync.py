@@ -95,10 +95,23 @@ def sync_holdings_to_notion(holdings_list):
             if symbol:
                 notion_holdings[symbol] = page_id
 
+        # 데이터베이스 스키마 보완 (새 칼럼 PurchaseVal, ProfitLoss 보장)
+        try:
+            update_db_url = f"https://api.notion.com/v1/databases/{db_id}"
+            schema_payload = {
+                "properties": {
+                    "PurchaseVal": {"number": {"format": "number"}},
+                    "ProfitLoss": {"number": {"format": "number"}}
+                }
+            }
+            requests.patch(update_db_url, headers=HEADERS, json=schema_payload, timeout=10)
+        except Exception:
+            pass
+
         # 2. 실시간 잔고 동기화 진행
         active_symbols = set()
         for item in holdings_list:
-            sym, name, qty, price, val_krw, currency = item
+            sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency = item
             active_symbols.add(sym)
             
             # 노션 데이터베이스 속성 빌드
@@ -107,7 +120,9 @@ def sync_holdings_to_notion(holdings_list):
                 "Symbol": {"rich_text": [{"text": {"content": sym}}]},
                 "Qty": {"number": float(qty)},
                 "Price": {"number": float(price)},
+                "PurchaseVal": {"number": float(purchase_val_krw)},
                 "Value": {"number": float(val_krw)},
+                "ProfitLoss": {"number": float(pl_rate)},
                 "Currency": {"select": {"name": currency}}
             }
             
@@ -230,7 +245,9 @@ def setup_notion_workspace():
                     "Symbol": {"rich_text": {}},
                     "Qty": {"number": {"format": "number"}},
                     "Price": {"number": {"format": "number"}},
+                    "PurchaseVal": {"number": {"format": "number"}},
                     "Value": {"number": {"format": "number"}},
+                    "ProfitLoss": {"number": {"format": "number"}},
                     "Currency": {
                         "select": {
                             "options": [

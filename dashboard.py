@@ -155,20 +155,28 @@ class LiveDashboardApp:
         table_right_frame.pack(side="right", fill="both", expand=True, padx=(15, 0))
         self.current_pie_frame = table_right_frame
         
-        self.tree = ttk.Treeview(table_left_frame, columns=("Symbol", "Name", "Qty", "Price", "Value", "Currency"), show="headings")
+        self.tree = ttk.Treeview(table_left_frame, columns=("Symbol", "Name", "Qty", "Price", "PurchaseVal", "CurrentVal", "ProfitLoss", "Currency"), show="headings")
         self.tree.heading("Symbol", text="종목 코드")
         self.tree.heading("Name", text="회사명")
         self.tree.heading("Qty", text="보유 수량")
         self.tree.heading("Price", text="현재가")
-        self.tree.heading("Value", text="평가 금액(원화)")
+        self.tree.heading("PurchaseVal", text="매수 금액")
+        self.tree.heading("CurrentVal", text="평가 금액")
+        self.tree.heading("ProfitLoss", text="수익률")
         self.tree.heading("Currency", text="통화")
         
-        self.tree.column("Symbol", width=90, anchor="center")
-        self.tree.column("Name", width=140, anchor="w")
+        self.tree.column("Symbol", width=75, anchor="center")
+        self.tree.column("Name", width=120, anchor="w")
         self.tree.column("Qty", width=80, anchor="e")
-        self.tree.column("Price", width=100, anchor="e")
-        self.tree.column("Value", width=120, anchor="e")
-        self.tree.column("Currency", width=70, anchor="center")
+        self.tree.column("Price", width=90, anchor="e")
+        self.tree.column("PurchaseVal", width=110, anchor="e")
+        self.tree.column("CurrentVal", width=110, anchor="e")
+        self.tree.column("ProfitLoss", width=80, anchor="center")
+        self.tree.column("Currency", width=55, anchor="center")
+        
+        self.tree.tag_configure("plus", foreground="#F87171")  # Light red for profit
+        self.tree.tag_configure("minus", foreground="#60A5FA") # Light blue for loss
+        self.tree.tag_configure("neutral", foreground="#F8FAFC")
         self.tree.pack(fill="both", expand=True, side="left")
         
         scrollbar = ttk.Scrollbar(table_left_frame, orient="vertical", command=self.tree.yview)
@@ -321,7 +329,8 @@ class LiveDashboardApp:
                         "symbol": sym,
                         "quantity": info.get("purchase_qty", 0.0),
                         "lastPrice": price_original,
-                        "currency": "USD" if is_us else "KRW"
+                        "currency": "USD" if is_us else "KRW",
+                        "averagePurchasePrice": info.get("purchase_price", 0.0)
                     })
                     
             # 4. 실시간 보유 종목 원화 평가가액 계산
@@ -368,11 +377,32 @@ class LiveDashboardApp:
                     except Exception:
                         name = sym
                         
+                # 평단가 및 수익률 정보 조회
+                avg_buy_price = float(item.get("averagePurchasePrice", 0.0))
+                
+                # 만약 Toss API의 profitLoss 딕셔너리가 직접 있다면 활용
+                pl_dict = item.get("profitLoss", {})
+                if pl_dict:
+                    pl_rate = float(pl_dict.get("rate", 0.0)) * 100.0 # 백분율 (%)
+                else:
+                    if avg_buy_price > 0.0:
+                        pl_rate = ((price - avg_buy_price) / avg_buy_price) * 100.0
+                    else:
+                        pl_rate = 0.0
+                
+                # 매수금액 / 평가금액 계산 (원화 환산 기준)
+                avg_buy_price_krw = avg_buy_price * usd_krw if currency == "USD" else avg_buy_price
+                purchase_val_krw = qty * avg_buy_price_krw
+                
                 price_krw = price * usd_krw if currency == "USD" else price
                 val_krw = qty * price_krw
                 stock_valuation += val_krw
                 
-                holdings_list.append((sym, name, qty, price, val_krw, currency))
+                # 매수금액 안전장치 (매수 정보가 누락되어 0일 때 평가액 기준으로 동기화)
+                if purchase_val_krw <= 0.0:
+                    purchase_val_krw = val_krw
+                
+                holdings_list.append((sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency))
                 
             total_assets = cash_balance + stock_valuation
             
@@ -412,13 +442,24 @@ class LiveDashboardApp:
             self.tree.delete(row)
             
         for h in holdings_list:
-            sym, name, qty, price, val, curr = h
+            sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, curr = h
+            
             # 수량과 금액 예쁘게 포맷
             qty_str = f"{qty:.6f}" if curr == "USD" else f"{qty:,.0f}"
             price_str = f"$ {price:,.2f}" if curr == "USD" else f"₩ {price:,.0f}"
-            val_str = f"₩ {val:,.0f}"
+            purchase_val_str = f"₩ {purchase_val_krw:,.0f}"
+            val_str = f"₩ {val_krw:,.0f}"
+            pl_str = f"{pl_rate:+.2f}%"
             
-            self.tree.insert("", "end", values=(sym, name, qty_str, price_str, val_str, curr))
+            # 수익률에 따른 색상 태그 설정 (0.05% 기준 완화)
+            if pl_rate > 0.05:
+                tag = "plus"
+            elif pl_rate < -0.05:
+                tag = "minus"
+            else:
+                tag = "neutral"
+                
+            self.tree.insert("", "end", values=(sym, name, qty_str, price_str, purchase_val_str, val_str, pl_str, curr), tags=(tag,))
             
         self.draw_current_holdings_pie(holdings_list)
         
@@ -463,9 +504,9 @@ class LiveDashboardApp:
             colors = []
             
             for h in holdings_list:
-                sym, name, qty, price, val, curr = h
+                sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, curr = h
                 labels.append(name)
-                sizes.append(val)
+                sizes.append(val_krw)
                 if curr == "USD":
                     colors.append('#2563EB') # Blue for US
                 else:
