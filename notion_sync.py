@@ -25,6 +25,26 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+def translate_headline_to_korean(headline):
+    """
+    제미나이 1.5 플래시 모델을 활용하여 영문 뉴스 헤드라인을 자연스럽고 간결한 한국어로 번역합니다.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return headline
+    try:
+        import google.generativeai as genai
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel("gemini-2.5-flash")
+        prompt = f"Translate the following financial news headline to Korean in a natural, concise, professional analyst style. Output ONLY the Korean translation, with no quotes and no extra comments: {headline}"
+        response = model.generate_content(prompt)
+        if response and response.text:
+            return response.text.strip().replace('"', '')
+    except Exception as e:
+        # 콘솔 cp949 인코딩 오류 예방을 위해 아스키 경고 출력
+        print(f"[News Translate Warning] Failed to translate via Gemini: {e}")
+    return headline
+
 def find_database_by_name(name):
     """
     노션 워크스페이스에 공유된 데이터베이스 중 이름이 일치하는 데이터베이스 ID를 검색합니다.
@@ -83,7 +103,7 @@ def sync_holdings_to_notion(holdings_list):
         res.raise_for_status()
         existing_pages = res.json().get("results", [])
         
-        # Symbol -> PageID 매핑 딕셔너리 구축
+        # Symbol -> PageID 리스트 매핑 딕셔너리 구축 (중복 제거용)
         notion_holdings = {}
         for page in existing_pages:
             page_id = page.get("id")
@@ -93,7 +113,9 @@ def sync_holdings_to_notion(holdings_list):
             symbol_prop = props.get("Symbol", {}).get("rich_text", [])
             symbol = "".join([t.get("plain_text", "") for t in symbol_prop]).strip()
             if symbol:
-                notion_holdings[symbol] = page_id
+                if symbol not in notion_holdings:
+                    notion_holdings[symbol] = []
+                notion_holdings[symbol].append(page_id)
 
         # 데이터베이스 스키마 보완 (칼럼들 타입을 rich_text로 변경하여 형식 통일 및 깔끔하게 노출)
         try:
@@ -142,11 +164,16 @@ def sync_holdings_to_notion(holdings_list):
                 "Currency": {"select": {"name": currency}}
             }
             
-            if sym in notion_holdings:
-                # 기존 항목 정보 업데이트
-                page_id = notion_holdings[sym]
+            if sym in notion_holdings and notion_holdings[sym]:
+                # 기존 항목 정보 업데이트 (첫 번째 페이지 활용)
+                page_ids = notion_holdings[sym]
+                page_id = page_ids[0]
                 update_url = f"https://api.notion.com/v1/pages/{page_id}"
                 requests.patch(update_url, headers=HEADERS, json={"properties": properties}, timeout=10)
+                
+                # 나머지 중복 페이지들은 즉시 아카이브 처리하여 중복 제거!
+                for extra_page_id in page_ids[1:]:
+                    requests.patch(f"https://api.notion.com/v1/pages/{extra_page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
             else:
                 # 신규 항목 생성
                 create_url = "https://api.notion.com/v1/pages"
@@ -157,10 +184,11 @@ def sync_holdings_to_notion(holdings_list):
                 requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
 
         # 3. 더 이상 보유하지 않는 종목 삭제 (Archived 처리)
-        for sym, page_id in notion_holdings.items():
+        for sym, page_ids in notion_holdings.items():
             if sym not in active_symbols:
-                delete_url = f"https://api.notion.com/v1/pages/{page_id}"
-                requests.patch(delete_url, headers=HEADERS, json={"archived": True}, timeout=10)
+                for page_id in page_ids:
+                    delete_url = f"https://api.notion.com/v1/pages/{page_id}"
+                    requests.patch(delete_url, headers=HEADERS, json={"archived": True}, timeout=10)
                 
         print(f"[Notion Sync] 성공적으로 {len(holdings_list)}개의 잔고 종목을 노션 데이터베이스와 동기화 완료했습니다.")
     except Exception as e:
@@ -179,6 +207,25 @@ def sync_market_news_to_notion(news_list):
         return
         
     try:
+        # 데이터베이스 스키마 보완 (Market 칼럼 추가)
+        try:
+            update_db_url = f"https://api.notion.com/v1/databases/{db_id}"
+            schema_payload = {
+                "properties": {
+                    "Market": {
+                        "select": {
+                            "options": [
+                                {"name": "KRX", "color": "green"},
+                                {"name": "S&P500", "color": "blue"}
+                            ]
+                        }
+                    }
+                }
+            }
+            requests.patch(update_db_url, headers=HEADERS, json=schema_payload, timeout=10)
+        except Exception:
+            pass
+
         # 1. 기존의 노션 뉴스 아이템 전부 조회 후 아카이브 (최신 뉴스 위주 유지를 위함)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
         res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
@@ -203,14 +250,24 @@ def sync_market_news_to_notion(news_list):
             else:
                 date_str = datetime.datetime.now().isoformat()
                 
+            # 영문 뉴스 한글 번역
+            raw_title = art.get("title", "뉴스 헤드라인")
+            korean_title = translate_headline_to_korean(raw_title)
+            
+            # 국장/미장 시장 분류
+            sym = art.get("symbol", "")
+            is_us = not (sym.endswith('.KS') or sym.endswith('.KQ'))
+            market_val = "S&P500" if is_us else "KRX"
+            
             payload = {
                 "parent": {"database_id": db_id},
                 "properties": {
-                    "Name": {"title": [{"text": {"content": art.get("title", "뉴스 헤드라인")}}]},
-                    "Stock": {"rich_text": [{"text": {"content": art.get("symbol", "")}}]},
+                    "Name": {"title": [{"text": {"content": korean_title}}]},
+                    "Stock": {"rich_text": [{"text": {"content": sym}}]},
                     "Publisher": {"rich_text": [{"text": {"content": art.get("publisher", "")}}]},
                     "Link": {"url": art.get("link", "")},
-                    "Date": {"date": {"start": date_str}}
+                    "Date": {"date": {"start": date_str}},
+                    "Market": {"select": {"name": market_val}}
                 }
             }
             requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
@@ -434,7 +491,15 @@ def setup_notion_workspace():
                     "Stock": {"rich_text": {}},
                     "Publisher": {"rich_text": {}},
                     "Link": {"url": {}},
-                    "Date": {"date": {}}
+                    "Date": {"date": {}},
+                    "Market": {
+                        "select": {
+                            "options": [
+                                {"name": "KRX", "color": "green"},
+                                {"name": "S&P500", "color": "blue"}
+                            ]
+                        }
+                    }
                 }
             }
             c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
@@ -803,7 +868,7 @@ def update_notion_regime_style(regime_val):
                     }
                 ]
             }
-            requests.post(blocks_url, headers=HEADERS, json=append_payload, timeout=10)
+            requests.patch(blocks_url, headers=HEADERS, json=append_payload, timeout=10)
 
     except Exception as e:
         print(f"[Notion Regime Style Update Error] {e}")
