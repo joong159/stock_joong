@@ -303,6 +303,13 @@ class LiveDashboardApp:
             
         self.draw_current_holdings_pie(holdings_list)
         
+        # 노션 잔고 동기화 (UI 프리징 방지를 위해 백그라운드 스레드로 구동)
+        try:
+            from notion_sync import sync_holdings_to_notion
+            threading.Thread(target=sync_holdings_to_notion, args=(holdings_list,), daemon=True).start()
+        except Exception as e:
+            print(f"[Notion holdings trigger error] {e}")
+        
     def draw_current_holdings_pie(self, holdings_list):
         # 기존 차트 위젯들 제거
         for widget in self.current_pie_frame.winfo_children():

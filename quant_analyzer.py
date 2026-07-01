@@ -1311,6 +1311,14 @@ if __name__ == "__main__":
                                 try:
                                     res = toss_client.create_order(symbol=sym, side="SELL", quantity=qty, order_type="MARKET")
                                     log_success(f"[{t_name}] 매도 완료! (주문번호: {res.get('orderId')})")
+                                    try:
+                                        from notion_sync import log_trade_to_notion
+                                        val_krw = qty * float(row['Current_Price'])
+                                        if is_us:
+                                            val_krw *= usd_krw
+                                        log_trade_to_notion(symbol=sym, name=row['Name'], side="SELL", qty=qty, price=float(row['Current_Price']), val_krw=val_krw, reason=row['Reason'])
+                                    except Exception as ex:
+                                        log_warn(f"노션 일지 기록 실패: {ex}")
                                 except Exception as e:
                                     log_error(f"[{t_name}] 매도 실패: {e}")
                                     
@@ -1342,6 +1350,12 @@ if __name__ == "__main__":
                                             log_info(f"[{t_name}] 미국 소수점 금액 매수 주문 전송: ${val_usd:.2f} USD (사유: {row['Reason']})")
                                             res = toss_client.create_order(symbol=sym, side="BUY", order_amount=round(val_usd, 2), order_type="MARKET")
                                             log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
+                                            try:
+                                                from notion_sync import log_trade_to_notion
+                                                val_krw = float(row.get('Diff_Value(KRW)', 0.0))
+                                                log_trade_to_notion(symbol=sym, name=row['Name'], side="BUY", qty=val_usd / float(row['Current_Price']), price=float(row['Current_Price']), val_krw=val_krw, reason=row['Reason'])
+                                            except Exception as ex:
+                                                log_warn(f"노션 일지 기록 실패: {ex}")
                                         else:
                                             log_warn(f"[{t_name}] 미국 주식 매수 예산(${val_usd:.2f})이 최소 기준인 $1.00 미만이어서 건너뜁니다.")
                                     else:
@@ -1350,6 +1364,12 @@ if __name__ == "__main__":
                                             log_info(f"[{t_name}] 매수 주문 전송: {qty}주 (사유: {row['Reason']})")
                                             res = toss_client.create_order(symbol=sym, side="BUY", quantity=qty, order_type="MARKET")
                                             log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
+                                            try:
+                                                from notion_sync import log_trade_to_notion
+                                                val_krw = qty * float(row['Current_Price'])
+                                                log_trade_to_notion(symbol=sym, name=row['Name'], side="BUY", qty=qty, price=float(row['Current_Price']), val_krw=val_krw, reason=row['Reason'])
+                                            except Exception as ex:
+                                                log_warn(f"노션 일지 기록 실패: {ex}")
                                 except Exception as e:
                                     log_error(f"[{t_name}] 매수 실패: {e}")
                                     
