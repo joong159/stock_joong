@@ -219,6 +219,65 @@ def sync_market_news_to_notion(news_list):
     except Exception as e:
         print(f"[Notion News Error] {e}")
 
+def sync_recommended_portfolio_to_notion(portfolio_list):
+    """
+    김민겸 퀀트 추천 포트폴리오를 노션 데이터베이스('💡 퀀트 추천 포트폴리오')와 완벽 동기화합니다.
+    - portfolio_list: {"symbol": sym, "name": name, "market": mkt, "industry": ind, "score": score, "weight": weight, "amount": amt} 리스트
+    """
+    if not NOTION_TOKEN:
+        return
+        
+    db_id = find_database_by_name("💡 퀀트 추천 포트폴리오")
+    if not db_id:
+        print("[Notion Recommend] '퀀트 추천 포트폴리오' 데이터베이스를 찾을 수 없어 동기화를 건너뜁니다.")
+        return
+        
+    try:
+        # 1. 기존 노션 추천 포트폴리오 항목 전부 아카이브 (최신 추천 위주 유지를 위함)
+        query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+        if res.status_code == 200:
+            results = res.json().get("results", [])
+            for page in results:
+                page_id = page.get("id")
+                requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                
+        # 2. 신규 추천 항목 생성
+        for item in portfolio_list:
+            create_url = "https://api.notion.com/v1/pages"
+            
+            sym = item.get("symbol", "")
+            name = item.get("name", "")
+            market = item.get("market", "")
+            industry = item.get("industry", "")
+            score = item.get("score", 0.0)
+            weight = item.get("weight", 0.0)
+            amount = item.get("amount", 0.0)
+            
+            currency = "USD" if market == "SP500" else "KRW"
+            score_str = f"{score:+.2f}"
+            weight_str = f"{weight:.2f}%"
+            amount_str = f"₩ {amount:,.0f}"
+            
+            payload = {
+                "parent": {"database_id": db_id},
+                "properties": {
+                    "Name": {"title": [{"text": {"content": name}}]},
+                    "Symbol": {"rich_text": [{"text": {"content": sym}}]},
+                    "Market": {"rich_text": [{"text": {"content": market}}]},
+                    "Industry": {"rich_text": [{"text": {"content": industry}}]},
+                    "NewsScore": {"rich_text": [{"text": {"content": score_str}}]},
+                    "Weight": {"rich_text": [{"text": {"content": weight_str}}]},
+                    "InvestAmount": {"rich_text": [{"text": {"content": amount_str}}]},
+                    "Currency": {"select": {"name": currency}}
+                }
+            }
+            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            
+        print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다.")
+    except Exception as e:
+        print(f"[Notion Recommend Error] {e}")
+
 def log_trade_to_notion(symbol, name, side, qty, price, val_krw, reason=""):
     """
     체결된 거래 정보를 노션 데이터베이스('주식 거래 일지')에 새 로그로 기록합니다.
@@ -383,6 +442,37 @@ def setup_notion_workspace():
                 created_count += 1
             else:
                 return f"'📰 주요 시장 뉴스' 디비 생성 실패: {c_res.text}"
+
+        # 6. '💡 퀀트 추천 포트폴리오' 데이터베이스 생성
+        recommend_db_id = find_database_by_name("💡 퀀트 추천 포트폴리오")
+        if not recommend_db_id:
+            create_url = "https://api.notion.com/v1/databases"
+            db_payload = {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": [{"type": "text", "text": {"content": "💡 퀀트 추천 포트폴리오"}}],
+                "properties": {
+                    "Name": {"title": {}},
+                    "Symbol": {"rich_text": {}},
+                    "Market": {"rich_text": {}},
+                    "Industry": {"rich_text": {}},
+                    "NewsScore": {"rich_text": {}},
+                    "Weight": {"rich_text": {}},
+                    "InvestAmount": {"rich_text": {}},
+                    "Currency": {
+                        "select": {
+                            "options": [
+                                {"name": "KRW", "color": "green"},
+                                {"name": "USD", "color": "blue"}
+                            ]
+                        }
+                    }
+                }
+            }
+            c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
+            if c_res.status_code == 200:
+                created_count += 1
+            else:
+                return f"'💡 퀀트 추천 포트폴리오' 디비 생성 실패: {c_res.text}"
 
         if created_count > 0:
             return f"성공적으로 {created_count}개의 데이터베이스를 노션 페이지 하위에 생성/연동 완료했습니다!"

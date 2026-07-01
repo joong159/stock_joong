@@ -913,6 +913,28 @@ if __name__ == "__main__":
                 print(final_portfolio[output_cols].round(2).to_string())
                 print("="*60 + "\n")
                 
+                # 노션 추천 포트폴리오 동기화 (백그라운드 스레드로 실행)
+                try:
+                    from notion_sync import sync_recommended_portfolio_to_notion
+                    import threading
+                    
+                    recommend_list = []
+                    for ticker, row in final_portfolio.iterrows():
+                        recommend_list.append({
+                            "symbol": str(ticker),
+                            "name": str(row.get("Name", "")),
+                            "market": str(row.get("Market", "")),
+                            "industry": str(row.get("Industry", "")),
+                            "score": float(row.get("AI_News_Score", 0.0)),
+                            "weight": float(row.get("Weight(%)", 0.0)),
+                            "amount": float(row.get("Invest_Amount(KRW)", 0.0))
+                        })
+                    
+                    if recommend_list:
+                        sync_recommended_portfolio_to_notion(recommend_list)
+                except Exception as ex:
+                    print(f"[Notion Recommend Trigger Error] {ex}")
+                
                 # --- 리밸런싱 주문 수량 계산 및 TOSS API 연동 (느슨한 로테이션 + 샹들리에 에그짓) ---
                 df_rebal = pd.DataFrame()
                 toss_holdings = []
