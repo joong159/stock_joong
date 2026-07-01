@@ -432,17 +432,60 @@ def decorate_notion_workspace():
         if not page_id:
             return "노션에서 '주식 자동 리밸런싱 대시보드' 페이지를 찾을 수 없습니다."
 
+        # 시장 국면 계절에 따른 동적 아이콘/커버 로드
+        regime_val = "UNKNOWN"
+        if os.path.exists(".market_regime.txt"):
+            try:
+                with open(".market_regime.txt", "r", encoding="utf-8") as f:
+                    regime_val = f.read().strip()
+            except Exception:
+                pass
+
+        regime_styles = {
+            "SPRING": {
+                "emoji": "🌸",
+                "cover": "https://images.unsplash.com/photo-1522748906645-95d8adfd52c7?q=80&w=2070&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: 🌸 봄 - SPRING)"
+            },
+            "SUMMER": {
+                "emoji": "☀️",
+                "cover": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=2073&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: ☀️ 여름 - SUMMER)"
+            },
+            "FALL": {
+                "emoji": "🍁",
+                "cover": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=2070&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: 🍁 가을 - FALL)"
+            },
+            "WINTER": {
+                "emoji": "❄️",
+                "cover": "https://images.unsplash.com/photo-1491002052546-bf38f186af56?q=80&w=2008&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: ❄️ 겨울 - WINTER)"
+            }
+        }
+        
+        style = regime_styles.get(regime_val, {
+            "emoji": "📈",
+            "cover": "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=2070&auto=format&fit=crop",
+            "title_suffix": ""
+        })
+
         # 2. 페이지 아이콘 및 커버 설정 (PATCH /v1/pages/{page_id})
         page_url = f"https://api.notion.com/v1/pages/{page_id}"
         page_payload = {
             "icon": {
                 "type": "emoji",
-                "emoji": "📈"
+                "emoji": style["emoji"]
             },
             "cover": {
                 "type": "external",
                 "external": {
-                    "url": "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=2070&auto=format&fit=crop"
+                    "url": style["cover"]
+                }
+            },
+            "properties": {
+                "title": {
+                    "title": [{"text": {"content": f"주식 자동 리밸런싱 대시보드{style['title_suffix']}"}}]
                 }
             }
         }
