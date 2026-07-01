@@ -49,6 +49,7 @@ class LiveDashboardApp:
         self.var_cash = tk.StringVar(value="로딩 중...")
         self.var_stock_val = tk.StringVar(value="로딩 중...")
         self.var_exchange_rate = tk.StringVar(value="로딩 중...")
+        self.var_market_regime = tk.StringVar(value="분석 대기 중")
         self.var_status = tk.StringVar(value="연결 상태 확인 중...")
         self.var_countdown = tk.StringVar(value="갱신 대기 중")
         
@@ -126,10 +127,17 @@ class LiveDashboardApp:
         tk.Label(c4, text="실시간 달러 환율", font=("Malgun Gothic", 10), fg="#94A3B8", bg="#1E293B").pack(pady=(10, 2))
         tk.Label(c4, textvariable=self.var_exchange_rate, font=("Malgun Gothic", 14, "bold"), fg="#F59E0B", bg="#1E293B").pack(pady=(3, 10))
         
+        # Card 5. 시장 계절
+        c5 = tk.Frame(grid_frame, bg="#1E293B", bd=1, relief="flat", highlightbackground="#334155", highlightthickness=1)
+        c5.grid(row=0, column=4, padx=10, sticky="nsew")
+        tk.Label(c5, text="현재 시장 계절", font=("Malgun Gothic", 10), fg="#94A3B8", bg="#1E293B").pack(pady=(10, 2))
+        tk.Label(c5, textvariable=self.var_market_regime, font=("Malgun Gothic", 14, "bold"), fg="#EC4899", bg="#1E293B").pack(pady=(3, 10))
+        
         grid_frame.columnconfigure(0, weight=1)
         grid_frame.columnconfigure(1, weight=1)
         grid_frame.columnconfigure(2, weight=1)
         grid_frame.columnconfigure(3, weight=1)
+        grid_frame.columnconfigure(4, weight=1)
         
         # --- Holdings Table Header ---
         lbl_holdings = tk.Label(self.root, text="📂 실시간 보유 주식 잔고 현황", font=("Malgun Gothic", 12, "bold"), fg="#F8FAFC", bg="#0F172A")
@@ -378,6 +386,26 @@ class LiveDashboardApp:
         self.var_cash.set(f"₩ {cash:,.0f}")
         self.var_stock_val.set(f"₩ {stock_val:,.0f}")
         self.var_exchange_rate.set(f"₩ {rate:,.2f}")
+        
+        # 시장 국면(계절) 로드 및 표시
+        regime = "분석 대기 중"
+        if os.path.exists(".market_regime.txt"):
+            try:
+                with open(".market_regime.txt", "r", encoding="utf-8") as f:
+                    regime_val = f.read().strip()
+                    if regime_val == "SPRING":
+                        regime = "🌸 봄 (SPRING)"
+                    elif regime_val == "SUMMER":
+                        regime = "☀️ 여름 (SUMMER)"
+                    elif regime_val == "FALL":
+                        regime = "🍁 가을 (FALL)"
+                    elif regime_val == "WINTER":
+                        regime = "❄️ 겨울 (WINTER)"
+                    else:
+                        regime = regime_val
+            except Exception:
+                pass
+        self.var_market_regime.set(regime)
         
         # 목록 지우고 재작성
         for row in self.tree.get_children():

@@ -68,6 +68,15 @@ def sync_holdings_to_notion(holdings_list):
         return
         
     try:
+        # 시장 국면 로드하여 노션 페이지 스타일 동적 업데이트
+        if os.path.exists(".market_regime.txt"):
+            try:
+                with open(".market_regime.txt", "r", encoding="utf-8") as f:
+                    regime_val = f.read().strip()
+                    update_notion_regime_style(regime_val)
+            except Exception:
+                pass
+
         # 1. 노션 데이터베이스의 기존 페이지 조회
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
         res = requests.post(query_url, headers=HEADERS, json={}, timeout=10)
@@ -396,3 +405,90 @@ def decorate_notion_workspace():
 
     except Exception as e:
         return f"노션 디자인 꾸미기 중 오류 발생: {e}"
+
+def update_notion_regime_style(regime_val):
+    """
+    현재 매크로 국면에 따라 노션 대시보드 페이지의 커버 이미지와 이모지를 동적으로 변경합니다.
+    """
+    if not NOTION_TOKEN:
+        return
+        
+    url = "https://api.notion.com/v1/search"
+    payload = {
+        "query": "주식 자동 리밸런싱 대시보드",
+        "filter": {
+            "property": "object",
+            "value": "page"
+        }
+    }
+    try:
+        res = requests.post(url, headers=HEADERS, json=payload, timeout=10)
+        if res.status_code != 200:
+            return
+        results = res.json().get("results", [])
+        page_id = None
+        for page in results:
+            props = page.get("properties", {})
+            for prop_name, prop_val in props.items():
+                if prop_val.get("type") == "title":
+                    title_list = prop_val.get("title", [])
+                    page_title = "".join([t.get("plain_text", "") for t in title_list])
+                    if "주식 자동 리밸런싱 대시보드" in page_title:
+                        page_id = page.get("id")
+                        break
+            if page_id:
+                break
+        if not page_id:
+            return
+
+        # 계절별 아이콘 및 커버 매핑
+        regime_styles = {
+            "SPRING": {
+                "emoji": "🌸",
+                "cover": "https://images.unsplash.com/photo-1522748906645-95d8adfd52c7?q=80&w=2070&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: 🌸 봄 - SPRING)"
+            },
+            "SUMMER": {
+                "emoji": "☀️",
+                "cover": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=2073&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: ☀️ 여름 - SUMMER)"
+            },
+            "FALL": {
+                "emoji": "🍁",
+                "cover": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=2070&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: 🍁 가을 - FALL)"
+            },
+            "WINTER": {
+                "emoji": "❄️",
+                "cover": "https://images.unsplash.com/photo-1491002052546-bf38f186af56?q=80&w=2008&auto=format&fit=crop",
+                "title_suffix": " (현재 계절: ❄️ 겨울 - WINTER)"
+            }
+        }
+
+        style = regime_styles.get(regime_val, {
+            "emoji": "📈",
+            "cover": "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=2070&auto=format&fit=crop",
+            "title_suffix": ""
+        })
+
+        page_url = f"https://api.notion.com/v1/pages/{page_id}"
+        page_payload = {
+            "icon": {
+                "type": "emoji",
+                "emoji": style["emoji"]
+            },
+            "cover": {
+                "type": "external",
+                "external": {
+                    "url": style["cover"]
+                }
+            },
+            "properties": {
+                "title": {
+                    "title": [{"text": {"content": f"주식 자동 리밸런싱 대시보드{style['title_suffix']}"}}]
+                }
+            }
+        }
+        requests.patch(page_url, headers=HEADERS, json=page_payload, timeout=10)
+    except Exception as e:
+        print(f"[Notion Regime Style Update Error] {e}")

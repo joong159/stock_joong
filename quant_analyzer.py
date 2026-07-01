@@ -787,6 +787,13 @@ if __name__ == "__main__":
         # 시장 국면 판단
         current_regime = classify_market_regime(market_df)
         
+        # 시장 국면 로컬 파일 저장
+        try:
+            with open(".market_regime.txt", "w", encoding="utf-8") as f:
+                f.write(str(current_regime))
+        except Exception as ex:
+            print(f"[REGIME SAVE WARNING] {ex}")
+        
         print("\n" + "="*60)
         log_success(f"현재 시장의 국면은: {Colors.BOLD}{current_regime}{Colors.RESET} 입니다.")
         print("="*60 + "\n")
