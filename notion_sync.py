@@ -150,6 +150,59 @@ def sync_holdings_to_notion(holdings_list):
     except Exception as e:
         print(f"[Notion Sync Error] {e}")
 
+def sync_market_news_to_notion(news_list):
+    """
+    주요 종목 뉴스 및 센티먼트 리스트를 노션 데이터베이스('📰 주요 시장 뉴스')와 동기화합니다.
+    """
+    if not NOTION_TOKEN:
+        return
+        
+    db_id = find_database_by_name("📰 주요 시장 뉴스")
+    if not db_id:
+        print("[Notion News] '📰 주요 시장 뉴스' 데이터베이스를 찾을 수 없어 뉴스 동기화를 건너뜁니다.")
+        return
+        
+    try:
+        # 1. 기존의 노션 뉴스 아이템 전부 조회 후 아카이브 (최신 뉴스 위주 유지를 위함)
+        query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+        if res.status_code == 200:
+            results = res.json().get("results", [])
+            for page in results:
+                page_id = page.get("id")
+                requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                
+        # 2. 신규 뉴스 아이템 생성
+        for art in news_list:
+            create_url = "https://api.notion.com/v1/pages"
+            
+            # 시간 파싱
+            pub_time = art.get("time")
+            if isinstance(pub_time, (int, float)):
+                try:
+                    dt = datetime.datetime.fromtimestamp(pub_time)
+                    date_str = dt.isoformat()
+                except Exception:
+                    date_str = datetime.datetime.now().isoformat()
+            else:
+                date_str = datetime.datetime.now().isoformat()
+                
+            payload = {
+                "parent": {"database_id": db_id},
+                "properties": {
+                    "Name": {"title": [{"text": {"content": art.get("title", "뉴스 헤드라인")}}]},
+                    "Stock": {"rich_text": [{"text": {"content": art.get("symbol", "")}}]},
+                    "Publisher": {"rich_text": [{"text": {"content": art.get("publisher", "")}}]},
+                    "Link": {"url": art.get("link", "")},
+                    "Date": {"date": {"start": date_str}}
+                }
+            }
+            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            
+        print(f"[Notion News] 성공적으로 {len(news_list)}개의 시장 뉴스를 동기화 완료했습니다.")
+    except Exception as e:
+        print(f"[Notion News Error] {e}")
+
 def log_trade_to_notion(symbol, name, side, qty, price, val_krw, reason=""):
     """
     체결된 거래 정보를 노션 데이터베이스('주식 거래 일지')에 새 로그로 기록합니다.
@@ -294,10 +347,31 @@ def setup_notion_workspace():
             else:
                 return f"'주식 거래 일지' 디비 생성 실패: {c_res.text}"
                 
+        # 5. '📰 주요 시장 뉴스' 데이터베이스 생성
+        news_db_id = find_database_by_name("📰 주요 시장 뉴스")
+        if not news_db_id:
+            create_url = "https://api.notion.com/v1/databases"
+            db_payload = {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": [{"type": "text", "text": {"content": "📰 주요 시장 뉴스"}}],
+                "properties": {
+                    "Name": {"title": {}},
+                    "Stock": {"rich_text": {}},
+                    "Publisher": {"rich_text": {}},
+                    "Link": {"url": {}},
+                    "Date": {"date": {}}
+                }
+            }
+            c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
+            if c_res.status_code == 200:
+                created_count += 1
+            else:
+                return f"'📰 주요 시장 뉴스' 디비 생성 실패: {c_res.text}"
+
         if created_count > 0:
-            return f"성공적으로 {created_count}개의 데이터베이스를 노션 페이지 하위에 생성했습니다!"
+            return f"성공적으로 {created_count}개의 데이터베이스를 노션 페이지 하위에 생성/연동 완료했습니다!"
         else:
-            return "이미 필요한 데이터베이스가 노션 워크스페이스에 생성되어 연동된 상태입니다."
+            return "이미 필요한 데이터베이스들이 노션 워크스페이스에 생성되어 연동된 상태입니다."
             
     except Exception as e:
         return f"노션 자동 설정 중 오류 발생: {e}"

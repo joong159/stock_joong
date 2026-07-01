@@ -404,14 +404,32 @@ class LiveDashboardApp:
                 
                 holdings_list.append((sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency))
                 
+            # 5. 주요 보유 종목 뉴스 수집
+            news_list = []
+            for h in holdings_list:
+                sym = h[0]
+                try:
+                    ticker_news = yf.Ticker(sym).news
+                    if ticker_news:
+                        for art in ticker_news[:2]:  # 최대 2개 뉴스 수집
+                            news_list.append({
+                                "symbol": sym,
+                                "title": art.get("title", ""),
+                                "publisher": art.get("publisher", ""),
+                                "link": art.get("link", ""),
+                                "time": art.get("providerPublishTime", 0)
+                            })
+                except Exception as ex:
+                    print(f"[News Fetch Warning] Failed for {sym}: {ex}")
+            
             total_assets = cash_balance + stock_valuation
             
             # 메인 스레드 안전 업데이트
-            self.root.after(0, self.update_gui_values, total_assets, cash_balance, stock_valuation, usd_krw, holdings_list)
+            self.root.after(0, self.update_gui_values, total_assets, cash_balance, stock_valuation, usd_krw, holdings_list, news_list)
         except Exception as e:
             self.root.after(0, self.show_error_message, str(e))
             
-    def update_gui_values(self, total, cash, stock_val, rate, holdings_list):
+    def update_gui_values(self, total, cash, stock_val, rate, holdings_list, news_list=[]):
         self.var_total_assets.set(f"₩ {total:,.0f}")
         self.var_cash.set(f"₩ {cash:,.0f}")
         self.var_stock_val.set(f"₩ {stock_val:,.0f}")
@@ -463,12 +481,14 @@ class LiveDashboardApp:
             
         self.draw_current_holdings_pie(holdings_list)
         
-        # 노션 잔고 동기화 (UI 프리징 방지를 위해 백그라운드 스레드로 구동)
+        # 노션 잔고 및 주요 뉴스 동기화 (UI 프리징 방지를 위해 백그라운드 스레드로 구동)
         try:
-            from notion_sync import sync_holdings_to_notion
+            from notion_sync import sync_holdings_to_notion, sync_market_news_to_notion
             threading.Thread(target=sync_holdings_to_notion, args=(holdings_list,), daemon=True).start()
+            if news_list:
+                threading.Thread(target=sync_market_news_to_notion, args=(news_list,), daemon=True).start()
         except Exception as e:
-            print(f"[Notion holdings trigger error] {e}")
+            print(f"[Notion sync trigger error] {e}")
         
     def draw_current_holdings_pie(self, holdings_list):
         # 기존 차트 위젯들 제거

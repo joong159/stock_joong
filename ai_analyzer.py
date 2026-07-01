@@ -93,6 +93,56 @@ def get_notion_trade_logs():
     except Exception as e:
         return None, f"노션 연동 중 오류 발생: {e}"
 
+def get_notion_market_news():
+    """
+    노션의 '📰 주요 시장 뉴스' 데이터베이스에서 최근 뉴스 기록들을 가져옵니다.
+    """
+    from notion_sync import find_database_by_name
+    db_id = find_database_by_name("📰 주요 시장 뉴스")
+    if not db_id:
+        return None, "노션에서 '📰 주요 시장 뉴스' 데이터베이스를 찾을 수 없습니다."
+
+    url = f"https://api.notion.com/v1/databases/{db_id}/query"
+    try:
+        res = requests.post(url, headers=HEADERS_NOTION, json={"page_size": 20}, timeout=10)
+        if res.status_code != 200:
+            return None, f"노션 API 호출 실패 (상태코드: {res.status_code})"
+            
+        results = res.json().get("results", [])
+        news_items = []
+        for page in results:
+            props = page.get("properties", {})
+            
+            # Title
+            title_prop = props.get("Name", {}).get("title", [])
+            title = "".join([t.get("plain_text", "") for t in title_prop]).strip()
+            
+            # Stock
+            stock_prop = props.get("Stock", {}).get("rich_text", [])
+            stock = "".join([t.get("plain_text", "") for t in stock_prop]).strip()
+            
+            # Publisher
+            pub_prop = props.get("Publisher", {}).get("rich_text", [])
+            publisher = "".join([t.get("plain_text", "") for t in pub_prop]).strip()
+            
+            # Link
+            link = props.get("Link", {}).get("url") or ""
+            
+            # Date
+            date_prop = props.get("Date", {}).get("date")
+            date_str = date_prop.get("start") if date_prop else ""
+            
+            news_items.append({
+                "title": title,
+                "stock": stock,
+                "publisher": publisher,
+                "link": link,
+                "date": date_str
+            })
+        return news_items, None
+    except Exception as e:
+        return None, f"노션 연동 중 뉴스 조회 오류 발생: {e}"
+
 def generate_trading_analysis_report():
     """
     노션 매매일지 데이터를 추출하여 Gemini API를 활용한 투자 행동 분석 보고서를 생성합니다.
@@ -135,32 +185,70 @@ def generate_trading_analysis_report():
     
     trade_table_markdown = "\n".join(trade_text_lines)
 
+    # 시장 국면 계절 로드
+    regime = "알 수 없음 (분석 대기 중)"
+    if os.path.exists(".market_regime.txt"):
+        try:
+            with open(".market_regime.txt", "r", encoding="utf-8") as f:
+                regime_val = f.read().strip()
+                if regime_val == "SPRING":
+                    regime = "🌸 봄 (SPRING) - 성장국면"
+                elif regime_val == "SUMMER":
+                    regime = "☀️ 여름 (SUMMER) - 과열국면"
+                elif regime_val == "FALL":
+                    regime = "🍁 가을 (FALL) - 쇠퇴국면"
+                elif regime_val == "WINTER":
+                    regime = "❄️ 겨울 (WINTER) - 위축국면"
+                else:
+                    regime = regime_val
+        except Exception:
+            pass
+
+    # 주요 시장 뉴스 조회
+    news_items, _ = get_notion_market_news()
+    news_text = ""
+    if news_items:
+        news_lines = []
+        for n in news_items:
+            date_part = n['date'][:10] if n['date'] else "N/A"
+            news_lines.append(f"- [{n['stock']}] {n['title']} (출처: {n['publisher']}, 날짜: {date_part})")
+        news_text = "\n".join(news_lines)
+    else:
+        news_text = "최근 등록된 보유 종목 관련 주요 뉴스가 없습니다."
+
     # Gemini 프롬프트 구축
     prompt = f"""
-당신은 행동재무학(Behavioral Finance) 전문가이자, 퀀트 트레이딩 심리 컨설턴트입니다. 
-유튜버 '노말이'의 AI 주식 공부법에 따라, 사용자의 실제 주식 거래 이력과 각 매매 당시 기입한 '매매 사유'를 정밀하게 평가하여 행동 분석 리포트를 작성해 주십시오.
+당신은 세계적인 투자은행(IB)의 수석 시장 전략가(Chief Market Strategist)이자 최고 애널리스트(Chief Analyst)입니다.
+사용자의 최근 주식 거래 내역과 현재 보유 종목들에 대한 최근 주요 뉴스 헤드라인, 그리고 분석된 매크로 시장 계절(국면) 정보를 대조하여 **현재 시장의 분위기와 센티먼트를 애널리스트 수준으로 냉철하고 정교하게 분석한 시장 분석 보고서**를 작성해 주십시오.
 
-[사용자의 매매 일지 기록]
+[현재 매크로 시장 계절 (Market Regime)]
+- {regime}
+
+[보유 종목 관련 최근 주요 뉴스 및 헤드라인]
+{news_text}
+
+[사용자의 매매 일지 기록 (최근 거래 내역)]
 {trade_table_markdown}
 
-위 매매 데이터를 바탕으로 다음 4가지 핵심 영역에 대해 깊이 있고 직관적인 분석 보고서를 작성해 주세요. 
-사용자에게 친근하면서도 날카롭고 구체적인 피드백을 전달해야 합니다. 존댓말로 작성하되, 투자 원칙을 지키도록 따뜻하게 권고하십시오.
+위 정보들을 종합적으로 분석하여 아래 서식에 맞게 마크다운(Markdown) 보고서로 작성해 주세요. 
+어투는 금융 리포트 특유의 격식 있고 정밀한 어조(하십시오체, 경어체)를 사용하고, 시장 상황에 대해 지나치게 감상적이거나 낙관적인 태도를 배제하고 데이터와 뉴스 센티먼트에 기반하여 날카롭게 서술해 주십시오.
 
 보고서 서식 양식 (Markdown 형식):
-# 🤖 AI 투자 심리 및 행동 경제학 분석 리포트
+# 📈 월가 수석 전략가 AI 시장 센티먼트 & 포트폴리오 진단 보고서
 
-## 1. 📊 나의 투자 성향 및 매매 패턴 진단
-- 사용자의 거래 주기, 평균 보유 시간, 선호하는 종목 유형(국장/미장 분포), 매매 집중도 등을 분석해 주세요.
+## 1. 🌐 글로벌 매크로 동향 & 시장 계절(국면) 분석
+- 현재 판단된 시장의 계절(국면)이 **{regime}**인 점과 글로벌 매크로 상황을 결합하여, 현재 주식시장의 전반적인 심리(위험 선호 vs 위험 회피) 및 자산군 분위기를 매크로 관점에서 명확하게 진단해 주십시오.
 
-## 2. 🧠 행동 경제학적 심리 취약점 분석 (행동 편향 진단)
-- **처분 효과(Disposition Effect)**: 수익 중인 주식은 너무 빨리 팔고(조급함), 손실 중인 주식은 지나치게 오래 쥐고 있는지(손실 회피 편향) 분석해 주세요.
-- **뇌동 매매 및 감정적 거래**: 매매 사유를 분석하여 계획적인 매수였는지, 혹은 뉴스나 시장 상승 분위기에 휩쓸린 감정적 추격 매수/충동 매도였는지 평가해 주세요.
+## 2. 📰 보유 종목별 뉴스 센티먼트 & 실시간 리스크 평가
+- 제공된 최신 뉴스 헤드라인과 종목 정보를 바탕으로, 사용자 포트폴리오 종목들의 주요 호재/악재와 시장의 반응(센티먼트)을 애널리스트 관점에서 해석해 주십시오.
+- 최근 시장 이슈가 해당 종목들의 중단기 주가 흐름에 미칠 영향과 잠재적 리스크 요인을 짚어 주십시오.
 
-## 3. 🎯 Chandelier Exit(추적 손절) 원칙 준수 평가
-- 샹들리에 출적 손절 라인이 제대로 지켜졌는지, 아니면 손절 원칙을 회피하거나 미루고 "강제 가치 투자" 모드로 전환했는지 매매 사유와 가격 추이를 근거로 평가해 주세요.
+## 3. ⚖️ 최근 매매 일지 피드백 & 전략적 제언
+- 최근 매매 일지 기록의 거래 내역(매수/매도 시점, 금액, 사유)을 현재 시장 분위기 및 뉴스 상황과 대조하여 합리적이었는지 분석해 주십시오.
+- 특히 시장 국면(계절)과 부합하는 행동이었는지, 샹들리에 추적 손절(Chandelier Exit) 규칙을 기계적으로 잘 준수하고 있는지 냉정하게 평가해 주십시오.
 
-## 4. 🚀 나만의 매매 행동 가이드라인 & 액션 플랜
-- 사용자의 취약점을 극복하기 위해 당장 실천해야 할 구체적인 투자 습관 개선안 3가지를 명확히 제시해 주세요.
+## 4. 🛠️ 대응 시나리오 & 애널리스트 권고 사항 (Actionable Strategy)
+- 다가오는 거래일 동안 사용자가 취해야 할 구체적인 포트폴리오 리밸런싱 전략, 리스크 헤징 방안(예: 현금 비중 조절, 손절가 상향 조정 등)을 3가지 내외로 구체적으로 제안해 주십시오.
 """
 
     # Gemini API 호출 (Requests 활용)
