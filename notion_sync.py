@@ -95,13 +95,16 @@ def sync_holdings_to_notion(holdings_list):
             if symbol:
                 notion_holdings[symbol] = page_id
 
-        # 데이터베이스 스키마 보완 (새 칼럼 PurchaseVal, ProfitLoss 보장)
+        # 데이터베이스 스키마 보완 (칼럼들 타입을 rich_text로 변경하여 형식 통일 및 깔끔하게 노출)
         try:
             update_db_url = f"https://api.notion.com/v1/databases/{db_id}"
             schema_payload = {
                 "properties": {
-                    "PurchaseVal": {"number": {"format": "number"}},
-                    "ProfitLoss": {"number": {"format": "number"}}
+                    "Qty": {"rich_text": {}},
+                    "Price": {"rich_text": {}},
+                    "PurchaseVal": {"rich_text": {}},
+                    "Value": {"rich_text": {}},
+                    "ProfitLoss": {"rich_text": {}}
                 }
             }
             requests.patch(update_db_url, headers=HEADERS, json=schema_payload, timeout=10)
@@ -114,15 +117,28 @@ def sync_holdings_to_notion(holdings_list):
             sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency = item
             active_symbols.add(sym)
             
+            # 값 예쁘게 원화 및 달러 기호 포맷팅
+            if currency == "USD":
+                qty_str = f"{qty:.4f}" if qty % 1 != 0 else f"{int(qty)}"
+                price_krw = (val_krw / qty) if qty > 0 else (price * 1350.0)
+                price_str = f"$ {price:,.2f} (₩ {price_krw:,.0f})"
+            else:
+                qty_str = f"{qty:,.0f}"
+                price_str = f"₩ {price:,.0f}"
+                
+            purchase_val_str = f"₩ {purchase_val_krw:,.0f}"
+            val_str = f"₩ {val_krw:,.0f}"
+            pl_str = f"{pl_rate:+.2f}%"
+            
             # 노션 데이터베이스 속성 빌드
             properties = {
                 "Name": {"title": [{"text": {"content": name}}]},
                 "Symbol": {"rich_text": [{"text": {"content": sym}}]},
-                "Qty": {"number": float(qty)},
-                "Price": {"number": float(price)},
-                "PurchaseVal": {"number": float(purchase_val_krw)},
-                "Value": {"number": float(val_krw)},
-                "ProfitLoss": {"number": float(pl_rate)},
+                "Qty": {"rich_text": [{"text": {"content": qty_str}}]},
+                "Price": {"rich_text": [{"text": {"content": price_str}}]},
+                "PurchaseVal": {"rich_text": [{"text": {"content": purchase_val_str}}]},
+                "Value": {"rich_text": [{"text": {"content": val_str}}]},
+                "ProfitLoss": {"rich_text": [{"text": {"content": pl_str}}]},
                 "Currency": {"select": {"name": currency}}
             }
             
@@ -296,11 +312,11 @@ def setup_notion_workspace():
                 "properties": {
                     "Name": {"title": {}},
                     "Symbol": {"rich_text": {}},
-                    "Qty": {"number": {"format": "number"}},
-                    "Price": {"number": {"format": "number"}},
-                    "PurchaseVal": {"number": {"format": "number"}},
-                    "Value": {"number": {"format": "number"}},
-                    "ProfitLoss": {"number": {"format": "number"}},
+                    "Qty": {"rich_text": {}},
+                    "Price": {"rich_text": {}},
+                    "PurchaseVal": {"rich_text": {}},
+                    "Value": {"rich_text": {}},
+                    "ProfitLoss": {"rich_text": {}},
                     "Currency": {
                         "select": {
                             "options": [
