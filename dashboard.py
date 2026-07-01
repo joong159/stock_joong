@@ -63,6 +63,9 @@ class LiveDashboardApp:
         self.refresh_thread = threading.Thread(target=self.auto_refresh_loop, daemon=True)
         self.refresh_thread.start()
         
+        # 시작 시 매크로 시장 국면(계절) 판단 백그라운드 구동
+        threading.Thread(target=self.initial_market_regime_check, daemon=True).start()
+        
     def setup_styles(self):
         style = ttk.Style()
         style.theme_use("clam")
@@ -291,6 +294,33 @@ class LiveDashboardApp:
                               relief="flat", padx=20, pady=5, command=report_popup.destroy)
         btn_close.pack(pady=15)
         
+    def initial_market_regime_check(self):
+        """
+        대시보드 시작 시 백그라운드에서 실시간 시장 국면(계절)을 신속히 판단하여 파일에 기록하고 화면을 갱신합니다.
+        """
+        try:
+            import pandas as pd
+            import yfinance as yf
+            from quant_analyzer import fetch_market_data, classify_market_regime
+            
+            # 지표 다운로드 및 분석 (약 1~2초 소요)
+            rates, sp500, vix = fetch_market_data()
+            if rates is not None and not rates.empty:
+                market_df = pd.concat([rates['Close'], sp500['Close'], vix['Close']], axis=1)
+                market_df.columns = ['US10Y_Rate', 'S&P500_Close', 'VIX_Close']
+                market_df.ffill(inplace=True)
+                
+                current_regime = classify_market_regime(market_df)
+                
+                # 파일에 기록
+                with open(".market_regime.txt", "w", encoding="utf-8") as f:
+                    f.write(str(current_regime))
+                    
+                # GUI 갱신 요청
+                self.root.after(0, self.fetch_live_data)
+        except Exception as e:
+            print(f"[Initial Regime Check Error] {e}")
+
     def fetch_live_data(self):
         """
         토스 API 혹은 로컬 시뮬레이터에서 실시간 계좌/주식 데이터를 조회합니다.
