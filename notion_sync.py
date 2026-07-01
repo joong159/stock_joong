@@ -490,6 +490,22 @@ def decorate_notion_workspace():
                                 {
                                     "type": "text",
                                     "text": {
+                                        "content": "현재 시장 계절: 분석 대기 중 (실시간 지표에 의해 자동으로 변동됩니다)"
+                                    }
+                                }
+                            ],
+                            "icon": {"type": "emoji", "emoji": "📈"},
+                            "color": "gray_background"
+                        }
+                    },
+                    {
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": [
+                                {
+                                    "type": "text",
+                                    "text": {
                                         "content": "🛡️ 퀀트 투자 3대 절대 원칙\n1. 글로벌 자산 배분 비율 준수: 국장(한국 주식) 50% & 미장(미국 주식) 50% 비중 강제\n2. 샹들리에 추적 손절: Chandelier Exit 추적 손절라인 이탈 시 기계적으로 전량 시장가 즉시 매도\n3. AI 심리 피드백: 매 거래 발생 시 마다 매매 사유를 기입하고, 주기적으로 AI 자산진단을 수행하여 뇌동 매매를 방지"
                                     }
                                 }
@@ -597,5 +613,64 @@ def update_notion_regime_style(regime_val):
             }
         }
         requests.patch(page_url, headers=HEADERS, json=page_payload, timeout=10)
+
+        # 4. 페이지 본문 내부의 '현재 시장 계절' 콜아웃 박스도 찾아서 동적으로 동기화
+        blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
+        b_res = requests.get(blocks_url, headers=HEADERS, timeout=10)
+        regime_block_id = None
+        if b_res.status_code == 200:
+            blocks = b_res.json().get("results", [])
+            for block in blocks:
+                if block.get("type") == "callout":
+                    c_texts = block.get("callout", {}).get("rich_text", [])
+                    c_text = "".join([t.get("plain_text", "") for t in c_texts]).strip()
+                    if "현재 시장 계절:" in c_text or "시장 계절:" in c_text:
+                        regime_block_id = block.get("id")
+                        break
+
+        regime_desc_map = {
+            "SPRING": "현재 시장 계절: 🌸 봄 (SPRING) - 성장 국면 (적극 주식 매수 전략)",
+            "SUMMER": "현재 시장 계절: ☀️ 여름 (SUMMER) - 과열 국면 (주도 업종 선별 매수 전략)",
+            "FALL": "현재 시장 계절: 🍁 가을 (FALL) - 쇠퇴 국면 (안전 자산 방어 및 리스크 대비)",
+            "WINTER": "현재 시장 계절: ❄️ 겨울 (WINTER) - 위축 국면 (현금화 및 하방 대기 전략)"
+        }
+        regime_text = regime_desc_map.get(regime_val, f"현재 시장 계절: {regime_val}")
+
+        regime_color_map = {
+            "SPRING": "green_background",
+            "SUMMER": "orange_background",
+            "FALL": "yellow_background",
+            "WINTER": "blue_background"
+        }
+        regime_color = regime_color_map.get(regime_val, "gray_background")
+
+        if regime_block_id:
+            # 기존 블록 내용 패치
+            patch_block_url = f"https://api.notion.com/v1/blocks/{regime_block_id}"
+            patch_payload = {
+                "callout": {
+                    "rich_text": [{"type": "text", "text": {"content": regime_text}}],
+                    "icon": {"type": "emoji", "emoji": style["emoji"]},
+                    "color": regime_color
+                }
+            }
+            requests.patch(patch_block_url, headers=HEADERS, json=patch_payload, timeout=10)
+        else:
+            # 없으면 추가 (소개글 밑 등에 생성되도록 append)
+            append_payload = {
+                "children": [
+                    {
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": [{"type": "text", "text": {"content": regime_text}}],
+                            "icon": {"type": "emoji", "emoji": style["emoji"]},
+                            "color": regime_color
+                        }
+                    }
+                ]
+            }
+            requests.post(blocks_url, headers=HEADERS, json=append_payload, timeout=10)
+
     except Exception as e:
         print(f"[Notion Regime Style Update Error] {e}")
