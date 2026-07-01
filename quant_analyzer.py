@@ -400,7 +400,8 @@ def get_news_sentiment(ticker):
             
             scores = []
             for article in news:
-                title = article.get('title', '')
+                content = article.get("content", {})
+                title = content.get("title", "") if content else article.get("title", "")
                 if title:
                     res = FINBERT_PIPELINE(title)[0]
                     if res['label'] == 'positive':
@@ -414,7 +415,8 @@ def get_news_sentiment(ticker):
             sia = SentimentIntensityAnalyzer()
             scores = []
             for article in news:
-                title = article.get('title', '')
+                content = article.get("content", {})
+                title = content.get("title", "") if content else article.get("title", "")
                 if title:
                     scores.append(sia.polarity_scores(title)['compound'])
             return sum(scores) / len(scores) if scores else 0.0

@@ -21,6 +21,40 @@ def load_dotenv(dotenv_path=".env"):
         except Exception:
             pass
 
+def parse_yfinance_news_article(article):
+    content = article.get("content", {})
+    if content:
+        title = content.get("title", "")
+        provider = content.get("provider", {})
+        publisher = provider.get("displayName", "") if provider else ""
+        link = content.get("clickThroughUrl", {}).get("url") or content.get("canonicalUrl", {}).get("url") or ""
+        pub_date_str = content.get("pubDate")
+        time_val = 0
+        if pub_date_str:
+            try:
+                import datetime
+                dt = datetime.datetime.strptime(pub_date_str.replace("Z", "+00:00"), "%Y-%m-%dT%H:%M:%S%z")
+                time_val = int(dt.timestamp())
+            except Exception:
+                pass
+        return {
+            "title": title,
+            "publisher": publisher,
+            "link": link,
+            "time": time_val
+        }
+    
+    title = article.get("title", "")
+    publisher = article.get("publisher", "")
+    link = article.get("link", "")
+    time_val = article.get("providerPublishTime", 0)
+    return {
+        "title": title,
+        "publisher": publisher,
+        "link": link,
+        "time": time_val
+    }
+
 class LiveDashboardApp:
     def __init__(self, root):
         self.root = root
@@ -442,13 +476,15 @@ class LiveDashboardApp:
                     ticker_news = yf.Ticker(sym).news
                     if ticker_news:
                         for art in ticker_news[:2]:  # 최대 2개 뉴스 수집
-                            news_list.append({
-                                "symbol": sym,
-                                "title": art.get("title", ""),
-                                "publisher": art.get("publisher", ""),
-                                "link": art.get("link", ""),
-                                "time": art.get("providerPublishTime", 0)
-                            })
+                            parsed = parse_yfinance_news_article(art)
+                            if parsed.get("title"):
+                                news_list.append({
+                                    "symbol": sym,
+                                    "title": parsed["title"],
+                                    "publisher": parsed["publisher"],
+                                    "link": parsed["link"],
+                                    "time": parsed["time"]
+                                })
                 except Exception as ex:
                     print(f"[News Fetch Warning] Failed for {sym}: {ex}")
             
