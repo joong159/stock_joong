@@ -189,6 +189,11 @@ class LiveDashboardApp:
                                      relief="flat", padx=15, command=self.run_notion_setup)
         btn_notion_setup.pack(side="right", padx=10)
         
+        btn_ai_analysis = tk.Button(ctrl_frame, text="🤖 AI 투자 행동 분석", font=("Malgun Gothic", 10, "bold"),
+                                    bg="#8B5CF6", fg="#FFFFFF", activebackground="#7C3AED", activeforeground="#FFFFFF",
+                                    relief="flat", padx=15, command=self.run_ai_analysis)
+        btn_ai_analysis.pack(side="right", padx=10)
+        
     def run_notion_setup(self):
         confirm = messagebox.askyesno("노션 자동 연동 설정", 
             "노션 워크스페이스에 '주식 자동 리밸런싱 대시보드'라는 이름의 빈 페이지를 만드셨나요?\n"
@@ -210,6 +215,64 @@ class LiveDashboardApp:
                 self.root.after(0, self.manual_refresh)
                 
         threading.Thread(target=setup_bg, daemon=True).start()
+
+    def run_ai_analysis(self):
+        # 로딩 팝업 표시
+        loading_popup = tk.Toplevel(self.root)
+        loading_popup.title("🤖 AI 투자 행동 분석 중...")
+        loading_popup.geometry("400x150")
+        loading_popup.configure(bg="#0F172A")
+        loading_popup.transient(self.root)
+        loading_popup.grab_set()
+        
+        lbl_msg = tk.Label(loading_popup, text="🔄 노션 거래 일지를 수집하고\nGemini AI 분석 보고서를 생성하는 중입니다...\n(약 10~25초 소요)", 
+                           font=("Malgun Gothic", 10, "bold"), fg="#F8FAFC", bg="#0F172A", pady=25)
+        lbl_msg.pack()
+        
+        def analysis_bg():
+            try:
+                from ai_analyzer import generate_trading_analysis_report
+                report_text = generate_trading_analysis_report()
+                
+                # 로딩 창 닫기
+                self.root.after(0, loading_popup.destroy)
+                
+                # 결과 창 팝업
+                self.root.after(0, lambda: self.show_ai_report_popup(report_text))
+            except Exception as e:
+                self.root.after(0, loading_popup.destroy)
+                self.root.after(0, lambda: messagebox.showerror("AI 분석 오류", f"분석 연동 중 오류 발생: {e}"))
+                
+        threading.Thread(target=analysis_bg, daemon=True).start()
+
+    def show_ai_report_popup(self, report_text):
+        report_popup = tk.Toplevel(self.root)
+        report_popup.title("🤖 AI 투자 행동 및 심리 분석 리포트")
+        report_popup.geometry("800x600")
+        report_popup.configure(bg="#0F172A")
+        report_popup.transient(self.root)
+        report_popup.grab_set()
+        
+        lbl_title = tk.Label(report_popup, text="📋 AI 투자 심리 & 매매 일지 분석 결과 보고서", font=("Malgun Gothic", 14, "bold"), fg="#8B5CF6", bg="#0F172A")
+        lbl_title.pack(pady=15)
+        
+        txt_frame = tk.Frame(report_popup, bg="#0F172A")
+        txt_frame.pack(fill="both", expand=True, padx=25, pady=5)
+        
+        txt_report = tk.Text(txt_frame, bg="#1E293B", fg="#F8FAFC", insertbackground="white", font=("Malgun Gothic", 10), wrap="word", relief="flat")
+        txt_report.pack(side="left", fill="both", expand=True)
+        
+        scroll = ttk.Scrollbar(txt_frame, orient="vertical", command=txt_report.yview)
+        txt_report.configure(yscrollcommand=scroll.set)
+        scroll.pack(side="right", fill="y")
+        
+        txt_report.insert("1.0", report_text)
+        txt_report.config(state="disabled")
+        
+        btn_close = tk.Button(report_popup, text="확인 후 닫기", font=("Malgun Gothic", 10, "bold"),
+                              bg="#64748B", fg="#FFFFFF", activebackground="#475569", activeforeground="#FFFFFF",
+                              relief="flat", padx=20, pady=5, command=report_popup.destroy)
+        btn_close.pack(pady=15)
         
     def fetch_live_data(self):
         """
