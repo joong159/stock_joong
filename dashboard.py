@@ -182,7 +182,34 @@ class LiveDashboardApp:
         btn_rebalance = tk.Button(ctrl_frame, text="포트폴리오 분석 및 리밸런싱 주문", font=("Malgun Gothic", 10, "bold"),
                                   bg="#10B981", fg="#FFFFFF", activebackground="#059669", activeforeground="#FFFFFF",
                                   relief="flat", padx=15, command=self.run_rebalance_engine)
-        btn_rebalance.pack(side="right", padx=20)
+        btn_rebalance.pack(side="right", padx=15)
+        
+        btn_notion_setup = tk.Button(ctrl_frame, text="🔗 노션 자동 설정", font=("Malgun Gothic", 10, "bold"),
+                                     bg="#475569", fg="#FFFFFF", activebackground="#334155", activeforeground="#FFFFFF",
+                                     relief="flat", padx=15, command=self.run_notion_setup)
+        btn_notion_setup.pack(side="right", padx=10)
+        
+    def run_notion_setup(self):
+        confirm = messagebox.askyesno("노션 자동 연동 설정", 
+            "노션 워크스페이스에 '주식 자동 리밸런싱 대시보드'라는 이름의 빈 페이지를 만드셨나요?\n"
+            "그리고 생성하신 노션 API 통합 권한을 해당 페이지에 연결하셨나요?\n\n"
+            "확인을 누르시면 페이지를 자동으로 탐색하고 2개의 테이블 데이터베이스를 생성합니다.")
+        if not confirm:
+            return
+            
+        self.var_countdown.set("🔗 노션 자동 셋업 중...")
+        
+        def setup_bg():
+            try:
+                from notion_sync import setup_notion_workspace
+                msg = setup_notion_workspace()
+                self.root.after(0, lambda: messagebox.showinfo("노션 설정 결과", msg))
+            except Exception as e:
+                self.root.after(0, lambda: messagebox.showerror("노션 설정 오류", f"작업 중 오류 발생: {e}"))
+            finally:
+                self.root.after(0, self.manual_refresh)
+                
+        threading.Thread(target=setup_bg, daemon=True).start()
         
     def fetch_live_data(self):
         """

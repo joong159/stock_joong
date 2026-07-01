@@ -158,8 +158,120 @@ def log_trade_to_notion(symbol, name, side, qty, price, val_krw, reason=""):
             "parent": {"database_id": db_id},
             "properties": properties
         }
-        res = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+        requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
         res.raise_for_status()
         print(f"[Notion Log] 성공적으로 {name}({symbol})의 {side} 거래 정보를 노션 일지에 기록했습니다.")
     except Exception as e:
         print(f"[Notion Log Error] {e}")
+
+def setup_notion_workspace():
+    """
+    사용자가 생성한 '주식 자동 리밸런싱 대시보드' 페이지를 검색한 뒤,
+    그 하위에 필요한 2개의 데이터베이스를 자동으로 생성해 줍니다.
+    """
+    if not NOTION_TOKEN:
+        return "Notion API 토큰(.env의 NOTION_TOKEN)이 설정되어 있지 않습니다."
+        
+    # 1. '주식 자동 리밸런싱 대시보드' 페이지 검색
+    url = "https://api.notion.com/v1/search"
+    payload = {
+        "query": "주식 자동 리밸런싱 대시보드",
+        "filter": {
+            "property": "object",
+            "value": "page"
+        }
+    }
+    
+    try:
+        res = requests.post(url, headers=HEADERS, json=payload, timeout=10)
+        if res.status_code != 200:
+            return f"노션 API 호출 실패 (상태코드: {res.status_code})"
+            
+        results = res.json().get("results", [])
+        parent_page_id = None
+        for page in results:
+            props = page.get("properties", {})
+            for prop_name, prop_val in props.items():
+                if prop_val.get("type") == "title":
+                    title_list = prop_val.get("title", [])
+                    page_title = "".join([t.get("plain_text", "") for t in title_list])
+                    if page_title.strip() == "주식 자동 리밸런싱 대시보드":
+                        parent_page_id = page.get("id")
+                        break
+            if parent_page_id:
+                break
+                
+        if not parent_page_id:
+            return "노션에서 '주식 자동 리밸런싱 대시보드'라는 이름의 페이지를 찾을 수 없습니다.\n먼저 새 페이지를 만든 뒤, 우측 상단 '...' -> '연결 대상'에서 생성하신 API를 추가해 주세요."
+            
+        # 2. 이미 데이터베이스가 있는지 검사
+        holdings_db_id = find_database_by_name("실시간 보유 잔고 현황")
+        logs_db_id = find_database_by_name("주식 거래 일지")
+        
+        created_count = 0
+        
+        # 3. '실시간 보유 잔고 현황' 생성
+        if not holdings_db_id:
+            create_url = "https://api.notion.com/v1/databases"
+            db_payload = {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": [{"type": "text", "text": {"content": "실시간 보유 잔고 현황"}}],
+                "properties": {
+                    "Name": {"title": {}},
+                    "Symbol": {"rich_text": {}},
+                    "Qty": {"number": {"format": "number"}},
+                    "Price": {"number": {"format": "number"}},
+                    "Value": {"number": {"format": "number"}},
+                    "Currency": {
+                        "select": {
+                            "options": [
+                                {"name": "KRW", "color": "green"},
+                                {"name": "USD", "color": "blue"}
+                            ]
+                        }
+                    }
+                }
+            }
+            c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
+            if c_res.status_code == 200:
+                created_count += 1
+            else:
+                return f"'실시간 보유 잔고 현황' 디비 생성 실패: {c_res.text}"
+                
+        # 4. '주식 거래 일지' 생성
+        if not logs_db_id:
+            create_url = "https://api.notion.com/v1/databases"
+            db_payload = {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": [{"type": "text", "text": {"content": "주식 거래 일지"}}],
+                "properties": {
+                    "Name": {"title": {}},
+                    "Date": {"date": {}},
+                    "Symbol": {"rich_text": {}},
+                    "Side": {
+                        "select": {
+                            "options": [
+                                {"name": "BUY", "color": "green"},
+                                {"name": "SELL", "color": "red"}
+                            ]
+                        }
+                    },
+                    "Qty": {"number": {"format": "number"}},
+                    "Price": {"number": {"format": "number"}},
+                    "Value": {"number": {"format": "number"}},
+                    "Reason": {"rich_text": {}}
+                }
+            }
+            c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
+            if c_res.status_code == 200:
+                created_count += 1
+            else:
+                return f"'주식 거래 일지' 디비 생성 실패: {c_res.text}"
+                
+        if created_count > 0:
+            return f"성공적으로 {created_count}개의 데이터베이스를 노션 페이지 하위에 생성했습니다!"
+        else:
+            return "이미 필요한 데이터베이스가 노션 워크스페이스에 생성되어 연동된 상태입니다."
+            
+    except Exception as e:
+        return f"노션 자동 설정 중 오류 발생: {e}"
