@@ -74,7 +74,97 @@ def find_database_by_name(name):
         print(f"[Notion Connection Error] {e}")
     return None
 
-def sync_holdings_to_notion(holdings_list):
+def update_notion_kpi_card(total_assets, cash_balance, stock_valuation, usd_krw, holdings_list):
+    """
+    노션 대시보드 페이지 상단에 총 자산, 예수금, 주식 평가액, 총 평가 손익 등의 현황을
+    가독성이 뛰어난 프리미엄 자산 현황판(KPI Card)으로 생성하거나 실시간 업데이트합니다.
+    """
+    if not NOTION_TOKEN:
+        return
+    db_id = find_database_by_name("실시간 보유 잔고 현황")
+    if not db_id:
+        return
+        
+    try:
+        # 1. DB 정보를 조회하여 상위(parent) 페이지 ID를 획득합니다.
+        db_url = f"https://api.notion.com/v1/databases/{db_id}"
+        db_res = requests.get(db_url, headers=HEADERS, timeout=10)
+        if db_res.status_code != 200:
+            return
+        parent_page = db_res.json().get("parent", {})
+        page_id = parent_page.get("page_id")
+        if not page_id:
+            return
+            
+        # 2. 페이지 본문 블록 목록을 조회하여 기존 KPI 카드가 있는지 검색합니다.
+        blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
+        b_res = requests.get(blocks_url, headers=HEADERS, timeout=10)
+        kpi_block_id = None
+        if b_res.status_code == 200:
+            blocks = b_res.json().get("results", [])
+            for block in blocks:
+                if block.get("type") == "callout":
+                    c_texts = block.get("callout", {}).get("rich_text", [])
+                    c_text = "".join([t.get("plain_text", "") for t in c_texts]).strip()
+                    if "실시간 자산 및 리밸런싱 현황판" in c_text or "Real-time KPI Summary" in c_text:
+                        kpi_block_id = block.get("id")
+                        break
+                        
+        # 3. 누적 평가 수익 및 수익률 계산
+        total_purchase_val = 0.0
+        total_current_val = 0.0
+        for item in holdings_list:
+            # item 형식: (symbol, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency)
+            if len(item) >= 6:
+                total_purchase_val += float(item[4])
+                total_current_val += float(item[5])
+                
+        total_pl = total_current_val - total_purchase_val
+        pl_rate = (total_pl / total_purchase_val) * 100 if total_purchase_val > 0 else 0.0
+        
+        # 4. 현황판에 표시할 텍스트 템플릿 구성
+        kpi_text = (
+            f"📊 실시간 자산 및 리밸런싱 현황판 (Real-time KPI Summary)\n"
+            f"• 실시간 총 자산 (자산 평가금): ₩ {total_assets:,.0f}\n"
+            f"• 보유 예수금 (CASH): ₩ {cash_balance:,.0f}\n"
+            f"• 주식 평가액 (STOCKS): ₩ {stock_valuation:,.0f}\n"
+            f"• 포트폴리오 평가 손익: ₩ {total_pl:+,.0f} ({pl_rate:+.2f}%)\n"
+            f"• 기준 고시 환율 (USD/KRW): ₩ {usd_krw:,.2f}\n"
+            f"• 마지막 대시보드 갱신 시간: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        
+        if kpi_block_id:
+            # 기존 블록 내용 패치 (실시간 업데이트)
+            patch_url = f"https://api.notion.com/v1/blocks/{kpi_block_id}"
+            payload = {
+                "callout": {
+                    "rich_text": [{"type": "text", "text": {"content": kpi_text}}],
+                    "icon": {"type": "emoji", "emoji": "📊"},
+                    "color": "green_background"
+                }
+            }
+            requests.patch(patch_url, headers=HEADERS, json=payload, timeout=10)
+        else:
+            # 없을 경우 신규 생성하여 추가 (본문 최상단에 근접하도록 추가)
+            payload = {
+                "children": [
+                    {
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": [{"type": "text", "text": {"content": kpi_text}}],
+                            "icon": {"type": "emoji", "emoji": "📊"},
+                            "color": "green_background"
+                        }
+                    }
+                ]
+            }
+            requests.patch(blocks_url, headers=HEADERS, json=payload, timeout=10)
+            
+    except Exception as e:
+        print(f"[Notion KPI Update Error] {e}")
+
+def sync_holdings_to_notion(holdings_list, total_assets=None, cash_balance=None, stock_valuation=None, usd_krw=None):
     """
     실시간 보유 주식 잔고 현황을 노션 데이터베이스('실시간 보유 잔고 현황')와 완벽 동기화합니다.
     - holdings_list: (symbol, name, qty, price, val_krw, currency) 튜플 리스트
@@ -88,6 +178,10 @@ def sync_holdings_to_notion(holdings_list):
         return
         
     try:
+        # 실시간 자산 현황판 KPI 블록 동적 갱신
+        if total_assets is not None:
+            update_notion_kpi_card(total_assets, cash_balance, stock_valuation, usd_krw, holdings_list)
+
         # 시장 국면 로드하여 노션 페이지 스타일 동적 업데이트
         if os.path.exists(".market_regime.txt"):
             try:

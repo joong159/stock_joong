@@ -550,7 +550,7 @@ class LiveDashboardApp:
         # 노션 잔고 및 주요 뉴스 동기화 (UI 프리징 방지를 위해 백그라운드 스레드로 구동)
         try:
             from notion_sync import sync_holdings_to_notion, sync_market_news_to_notion
-            threading.Thread(target=sync_holdings_to_notion, args=(holdings_list,), daemon=True).start()
+            threading.Thread(target=sync_holdings_to_notion, args=(holdings_list, total_assets, cash, stock_val, rate), daemon=True).start()
             if news_list:
                 threading.Thread(target=sync_market_news_to_notion, args=(news_list,), daemon=True).start()
         except Exception as e:
