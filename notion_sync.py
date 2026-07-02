@@ -25,13 +25,70 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+import json
+
+TRANSLATION_CACHE_FILE = ".translation_cache.json"
+
+def load_translation_cache():
+    if os.path.exists(TRANSLATION_CACHE_FILE):
+        try:
+            with open(TRANSLATION_CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+def save_translation_cache(cache):
+    try:
+        with open(TRANSLATION_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=4)
+    except Exception:
+        pass
+
+def translate_via_google_fallback(text):
+    """
+    제미나이 할당량 초과 시 호출되는 백업 번역기 (구글 번역 무료 엔드포인트 활용)
+    """
+    try:
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "auto",
+            "tl": "ko",
+            "dt": "t",
+            "q": text
+        }
+        r = requests.get(url, params=params, timeout=5)
+        if r.status_code == 200:
+            res_json = r.json()
+            if res_json and len(res_json) > 0 and len(res_json[0]) > 0:
+                translated = "".join([part[0] for part in res_json[0] if part[0]])
+                return translated.strip()
+    except Exception as e:
+        print(f"[Google Translate Fallback Warning] Failed: {e}")
+    return text
+
 def translate_headline_to_korean(headline):
     """
-    제미나이 1.5 플래시 모델을 활용하여 영문 뉴스 헤드라인을 자연스럽고 간결한 한국어로 번역합니다.
+    제미나이 2.5 플래시 모델을 활용하여 영문 뉴스 헤드라인을 자연스럽고 간결한 한국어로 번역합니다.
+    - API 요청 수 절약 및 20회/일 무료 한도 보존을 위해 캐시를 탑재했습니다.
+    - 제미나이 Quota(할당량) 초과 혹은 API 오류 발생 시 무료 구글 번역 서비스로 즉각 Fallback 합니다.
     """
+    if not headline:
+        return headline
+        
+    cache = load_translation_cache()
+    if headline in cache:
+        return cache[headline]
+        
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        return headline
+        # API 키가 없으면 구글 번역 fallback 실행
+        translated = translate_via_google_fallback(headline)
+        cache[headline] = translated
+        save_translation_cache(cache)
+        return translated
+        
     try:
         import google.generativeai as genai
         genai.configure(api_key=api_key)
@@ -39,10 +96,19 @@ def translate_headline_to_korean(headline):
         prompt = f"Translate the following financial news headline to Korean in a natural, concise, professional analyst style. Output ONLY the Korean translation, with no quotes and no extra comments: {headline}"
         response = model.generate_content(prompt)
         if response and response.text:
-            return response.text.strip().replace('"', '')
+            translated = response.text.strip().replace('"', '')
+            cache[headline] = translated
+            save_translation_cache(cache)
+            return translated
     except Exception as e:
-        # 콘솔 cp949 인코딩 오류 예방을 위해 아스키 경고 출력
+        # 제미나이 429 할당량 초과 시 구글 번역 fallback 호출
         print(f"[News Translate Warning] Failed to translate via Gemini: {e}")
+        print("[News Translate] Falling back to free Google Translate API...")
+        translated = translate_via_google_fallback(headline)
+        cache[headline] = translated
+        save_translation_cache(cache)
+        return translated
+        
     return headline
 
 def find_database_by_name(name):
