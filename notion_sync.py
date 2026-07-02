@@ -824,6 +824,7 @@ def decorate_notion_workspace():
 def update_notion_regime_style(regime_val):
     """
     현재 매크로 국면에 따라 노션 대시보드 페이지의 커버 이미지와 이모지를 동적으로 변경합니다.
+    - 국장/미장 개별 시장 계절을 모두 반영하여 다단으로 보여줍니다.
     """
     if not NOTION_TOKEN:
         return
@@ -856,57 +857,69 @@ def update_notion_regime_style(regime_val):
         if not page_id:
             return
 
-        # 계절별 아이콘 및 커버 매핑
-        regime_styles = {
-            "SPRING": {
-                "emoji": "🌸",
-                "cover": "https://images.unsplash.com/photo-1522748906645-95d8adfd52c7?q=80&w=2070&auto=format&fit=crop",
-                "title_suffix": " (현재 계절: 🌸 봄 - SPRING)"
-            },
-            "SUMMER": {
-                "emoji": "☀️",
-                "cover": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=2073&auto=format&fit=crop",
-                "title_suffix": " (현재 계절: ☀️ 여름 - SUMMER)"
-            },
-            "FALL": {
-                "emoji": "🍁",
-                "cover": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=2070&auto=format&fit=crop",
-                "title_suffix": " (현재 계절: 🍁 가을 - FALL)"
-            },
-            "WINTER": {
-                "emoji": "❄️",
-                "cover": "https://images.unsplash.com/photo-1491002052546-bf38f186af56?q=80&w=2008&auto=format&fit=crop",
-                "title_suffix": " (현재 계절: ❄️ 겨울 - WINTER)"
-            }
+        # 1. 국장/미장 계절 값 파싱
+        regime_us = "SPRING"
+        regime_kr = "SPRING"
+        val_str = str(regime_val).strip()
+        
+        if val_str.startswith("{") or val_str.startswith("'{") or val_str.startswith('"{'):
+            try:
+                import json
+                clean_str = val_str.strip("'\"")
+                data = json.loads(clean_str)
+                regime_us = data.get("US", "SPRING")
+                regime_kr = data.get("KR", "SPRING")
+            except Exception:
+                pass
+        elif val_str.startswith("("):
+            try:
+                val_eval = eval(val_str)
+                if isinstance(val_eval, tuple) and len(val_eval) >= 2:
+                    regime_us = val_eval[0]
+                    regime_kr = val_eval[1]
+            except Exception:
+                pass
+        else:
+            regime_us = val_str
+            regime_kr = val_str
+
+        # 계절별 속성 딕셔너리
+        regime_attrs = {
+            "SPRING": {"emoji": "🌸", "name": "봄 (SPRING) - 성장 국면 (적극 매수)", "color": "green_background", "cover": "https://images.unsplash.com/photo-1522748906645-95d8adfd52c7?q=80&w=2070&auto=format&fit=crop"},
+            "SUMMER": {"emoji": "☀️", "name": "여름 (SUMMER) - 과열 국면 (선별 매수)", "color": "orange_background", "cover": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?q=80&w=2073&auto=format&fit=crop"},
+            "FALL": {"emoji": "🍁", "name": "가을 (FALL) - 쇠퇴 국면 (자산 방어)", "color": "yellow_background", "cover": "https://images.unsplash.com/photo-1506744038136-46273834b3fb?q=80&w=2070&auto=format&fit=crop"},
+            "WINTER": {"emoji": "❄️", "name": "겨울 (WINTER) - 위축 국면 (현금/숏)", "color": "blue_background", "cover": "https://images.unsplash.com/photo-1491002052546-bf38f186af56?q=80&w=2008&auto=format&fit=crop"}
         }
 
-        style = regime_styles.get(regime_val, {
-            "emoji": "📈",
-            "cover": "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=2070&auto=format&fit=crop",
-            "title_suffix": ""
-        })
+        # 기본 속성 폴백
+        default_attr = {"emoji": "📈", "name": "UNKNOWN", "color": "gray_background", "cover": "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=2070&auto=format&fit=crop"}
+        attr_us = regime_attrs.get(regime_us, default_attr)
+        attr_kr = regime_attrs.get(regime_kr, default_attr)
 
+        # 2. 페이지 아이콘 및 커버 설정 (미장 기준으로 비주얼 일관성 유지)
         page_url = f"https://api.notion.com/v1/pages/{page_id}"
+        title_suffix = f" (현재 계절: 미장 {attr_us['emoji']} / 국장 {attr_kr['emoji']})"
+        
         page_payload = {
             "icon": {
                 "type": "emoji",
-                "emoji": style["emoji"]
+                "emoji": attr_us["emoji"]
             },
             "cover": {
                 "type": "external",
                 "external": {
-                    "url": style["cover"]
+                    "url": attr_us["cover"]
                 }
             },
             "properties": {
                 "title": {
-                    "title": [{"text": {"content": f"주식 자동 리밸런싱 대시보드{style['title_suffix']}"}}]
+                    "title": [{"text": {"content": f"주식 자동 리밸런싱 대시보드{title_suffix}"}}]
                 }
             }
         }
         requests.patch(page_url, headers=HEADERS, json=page_payload, timeout=10)
 
-        # 4. 페이지 본문 내부의 '현재 시장 계절' 콜아웃 박스도 찾아서 동적으로 동기화
+        # 3. 페이지 본문 내부의 '현재 시장 계절' 콜아웃 박스 찾기
         blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
         b_res = requests.get(blocks_url, headers=HEADERS, timeout=10)
         regime_block_id = None
@@ -916,25 +929,19 @@ def update_notion_regime_style(regime_val):
                 if block.get("type") == "callout":
                     c_texts = block.get("callout", {}).get("rich_text", [])
                     c_text = "".join([t.get("plain_text", "") for t in c_texts]).strip()
-                    if "현재 시장 계절:" in c_text or "시장 계절:" in c_text:
+                    if "현재 시장 계절" in c_text or "시장 계절:" in c_text or "미국 시장 (S&P500):" in c_text:
                         regime_block_id = block.get("id")
                         break
 
-        regime_desc_map = {
-            "SPRING": "현재 시장 계절: 🌸 봄 (SPRING) - 성장 국면 (적극 주식 매수 전략)",
-            "SUMMER": "현재 시장 계절: ☀️ 여름 (SUMMER) - 과열 국면 (주도 업종 선별 매수 전략)",
-            "FALL": "현재 시장 계절: 🍁 가을 (FALL) - 쇠퇴 국면 (안전 자산 방어 및 리스크 대비)",
-            "WINTER": "현재 시장 계절: ❄️ 겨울 (WINTER) - 위축 국면 (현금화 및 하방 대기 전략)"
-        }
-        regime_text = regime_desc_map.get(regime_val, f"현재 시장 계절: {regime_val}")
-
-        regime_color_map = {
-            "SPRING": "green_background",
-            "SUMMER": "orange_background",
-            "FALL": "yellow_background",
-            "WINTER": "blue_background"
-        }
-        regime_color = regime_color_map.get(regime_val, "gray_background")
+        # 4. 현황판에 표시할 텍스트 템플릿 구성 (국장/미장 분리)
+        regime_text = (
+            f"현재 시장 계절 (Market Season Summary)\n"
+            f"• 🇺🇸 미국 시장 (S&P500): {attr_us['emoji']} {attr_us['name']}\n"
+            f"• 🇰🇷 한국 시장 (KRX): {attr_kr['emoji']} {attr_kr['name']}"
+        )
+        
+        # 콜아웃의 색상은 미장 색상으로 설정
+        regime_color = attr_us["color"]
 
         if regime_block_id:
             # 기존 블록 내용 패치
@@ -942,7 +949,7 @@ def update_notion_regime_style(regime_val):
             patch_payload = {
                 "callout": {
                     "rich_text": [{"type": "text", "text": {"content": regime_text}}],
-                    "icon": {"type": "emoji", "emoji": style["emoji"]},
+                    "icon": {"type": "emoji", "emoji": attr_us["emoji"]},
                     "color": regime_color
                 }
             }
@@ -956,7 +963,7 @@ def update_notion_regime_style(regime_val):
                         "type": "callout",
                         "callout": {
                             "rich_text": [{"type": "text", "text": {"content": regime_text}}],
-                            "icon": {"type": "emoji", "emoji": style["emoji"]},
+                            "icon": {"type": "emoji", "emoji": attr_us["emoji"]},
                             "color": regime_color
                         }
                     }

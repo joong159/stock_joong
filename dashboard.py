@@ -338,17 +338,19 @@ class LiveDashboardApp:
             from quant_analyzer import fetch_market_data, classify_market_regime
             
             # 지표 다운로드 및 분석 (약 1~2초 소요)
-            rates, sp500, vix = fetch_market_data()
+            rates, sp500, vix, kospi = fetch_market_data()
             if rates is not None and not rates.empty:
-                market_df = pd.concat([rates['Close'], sp500['Close'], vix['Close']], axis=1)
-                market_df.columns = ['US10Y_Rate', 'S&P500_Close', 'VIX_Close']
+                market_df = pd.concat([rates['Close'], sp500['Close'], vix['Close'], kospi['Close']], axis=1)
+                market_df.columns = ['US10Y_Rate', 'S&P500_Close', 'VIX_Close', 'KOSPI_Close']
                 market_df.ffill(inplace=True)
                 
                 current_regime = classify_market_regime(market_df)
                 
-                # 파일에 기록
+                # 파일에 기록 (JSON 형식으로 저장)
+                import json
+                regime_json = json.dumps({"US": current_regime[0], "KR": current_regime[1]}, ensure_ascii=False)
                 with open(".market_regime.txt", "w", encoding="utf-8") as f:
-                    f.write(str(current_regime))
+                    f.write(regime_json)
                     
                 # GUI 갱신 요청
                 self.root.after(0, self.fetch_live_data)
@@ -506,17 +508,23 @@ class LiveDashboardApp:
         if os.path.exists(".market_regime.txt"):
             try:
                 with open(".market_regime.txt", "r", encoding="utf-8") as f:
-                    regime_val = f.read().strip()
-                    if regime_val == "SPRING":
-                        regime = "🌸 봄 (SPRING)"
-                    elif regime_val == "SUMMER":
-                        regime = "☀️ 여름 (SUMMER)"
-                    elif regime_val == "FALL":
-                        regime = "🍁 가을 (FALL)"
-                    elif regime_val == "WINTER":
-                        regime = "❄️ 겨울 (WINTER)"
+                    regime_content = f.read().strip()
+                    
+                    def format_reg(val):
+                        if "SPRING" in val: return "🌸 봄 (SPRING)"
+                        if "SUMMER" in val: return "☀️ 여름 (SUMMER)"
+                        if "FALL" in val or "AUTUMN" in val: return "🍁 가을 (FALL)"
+                        if "WINTER" in val: return "❄️ 겨울 (WINTER)"
+                        return val
+                        
+                    if regime_content.startswith("{"):
+                        import json
+                        regime_data = json.loads(regime_content)
+                        regime_us = regime_data.get("US", "UNKNOWN")
+                        regime_kr = regime_data.get("KR", "UNKNOWN")
+                        regime = f"미국: {format_reg(regime_us)} | 한국: {format_reg(regime_kr)}"
                     else:
-                        regime = regime_val
+                        regime = format_reg(regime_content)
             except Exception:
                 pass
         self.var_market_regime.set(regime)

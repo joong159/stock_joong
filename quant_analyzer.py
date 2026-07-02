@@ -130,32 +130,49 @@ def fetch_market_data(start_date='2020-01-01'):
         rates = yf.download('^TNX', start=start_date, progress=False)
         sp500 = yf.download('^GSPC', start=start_date, progress=False)
         vix = yf.download('^VIX', start=start_date, progress=False)
+        kospi = yf.download('^KS11', start=start_date, progress=False)
         log_success("거시경제 데이터 수집 완료!")
-        return rates, sp500, vix
+        return rates, sp500, vix, kospi
     except Exception as e:
         log_error(f"거시경제 데이터 수집 중 오류가 발생했습니다: {e}")
-        return None, None, None
+        return None, None, None, None
 
 def classify_market_regime(df):
-    df['MA200'] = df['S&P500_Close'].rolling(window=200).mean()
+    df['MA200_US'] = df['S&P500_Close'].rolling(window=200).mean()
+    df['MA200_KR'] = df['KOSPI_Close'].rolling(window=200).mean()
     df['Rate_MA20'] = df['US10Y_Rate'].rolling(window=20).mean()
     
-    def get_regime(row):
-        if pd.isna(row['MA200']) or pd.isna(row['Rate_MA20']):
+    def get_regime_us(row):
+        if pd.isna(row['MA200_US']) or pd.isna(row['Rate_MA20']):
             return "UNKNOWN"
-        if row['S&P500_Close'] > row['MA200']:
+        if row['S&P500_Close'] > row['MA200_US']:
             if row['VIX_Close'] < 20:
-                return "SPRING (적극 매수)"
+                return "SPRING"
             else:
-                return "SUMMER (선별 매수)"
+                return "SUMMER"
         else:
             if row['US10Y_Rate'] < row['Rate_MA20']:
-                return "AUTUMN (방어 및 관망)"
+                return "FALL"
             else:
-                return "WINTER (현금화/숏)"
+                return "WINTER"
+
+    def get_regime_kr(row):
+        if pd.isna(row['MA200_KR']) or pd.isna(row['Rate_MA20']):
+            return "UNKNOWN"
+        if row['KOSPI_Close'] > row['MA200_KR']:
+            if row['VIX_Close'] < 20:
+                return "SPRING"
+            else:
+                return "SUMMER"
+        else:
+            if row['US10Y_Rate'] < row['Rate_MA20']:
+                return "FALL"
+            else:
+                return "WINTER"
                 
-    df['Regime'] = df.apply(get_regime, axis=1)
-    return df['Regime'].iloc[-1]
+    df['Regime_US'] = df.apply(get_regime_us, axis=1)
+    df['Regime_KR'] = df.apply(get_regime_kr, axis=1)
+    return df['Regime_US'].iloc[-1], df['Regime_KR'].iloc[-1]
 
 def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
     log_info(f"[알파 엔진] 업종 중립화 분석 중... (Market: {market})")
@@ -776,28 +793,30 @@ if __name__ == "__main__":
             log_error(f"토스증권 API 연동 모듈 초기화 실패: {e}")
             toss_client = None
             
-    rates, sp500, vix = fetch_market_data()
+    rates, sp500, vix, kospi = fetch_market_data()
     
     if rates is not None and not rates.empty:
         # 종가(Close) 기준으로 데이터 병합
-        market_df = pd.concat([rates['Close'], sp500['Close'], vix['Close']], axis=1)
-        market_df.columns = ['US10Y_Rate', 'S&P500_Close', 'VIX_Close']
+        market_df = pd.concat([rates['Close'], sp500['Close'], vix['Close'], kospi['Close']], axis=1)
+        market_df.columns = ['US10Y_Rate', 'S&P500_Close', 'VIX_Close', 'KOSPI_Close']
         
         # 휴장일 차이로 인해 발생한 결측치(NaN)를 이전 영업일 데이터로 채우기
         market_df.ffill(inplace=True)
         
-        # 시장 국면 판단
+        # 시장 국면 판단 (미국, 한국 각각 분류)
         current_regime = classify_market_regime(market_df)
         
-        # 시장 국면 로컬 파일 저장
+        # 시장 국면 로컬 파일 저장 (JSON 형식으로 국장/미장 나누어 보관)
         try:
+            import json
+            regime_json = json.dumps({"US": current_regime[0], "KR": current_regime[1]}, ensure_ascii=False)
             with open(".market_regime.txt", "w", encoding="utf-8") as f:
-                f.write(str(current_regime))
+                f.write(regime_json)
         except Exception as ex:
             print(f"[REGIME SAVE WARNING] {ex}")
         
         print("\n" + "="*60)
-        log_success(f"현재 시장의 국면은: {Colors.BOLD}{current_regime}{Colors.RESET} 입니다.")
+        log_success(f"현재 시장 국면 - 미장(US): {Colors.BOLD}{current_regime[0]}{Colors.RESET} | 국장(KR): {Colors.BOLD}{current_regime[1]}{Colors.RESET}")
         print("="*60 + "\n")
         
         # 캐시 로드
@@ -999,8 +1018,15 @@ if __name__ == "__main__":
                 # 리밸런싱 조정 테이블 계산
                 rebal_data = []
                 
-                # WINTER 국면 여부 확인 (WINTER 국면일 경우 전량 매도 청산)
-                is_winter = "WINTER" in current_regime
+                # WINTER 국면 여부 확인 (미국/한국 각각 독립적으로 판단)
+                is_us_winter = False
+                is_kr_winter = False
+                if isinstance(current_regime, tuple):
+                    is_us_winter = "WINTER" in current_regime[0]
+                    is_kr_winter = "WINTER" in current_regime[1]
+                else:
+                    is_us_winter = "WINTER" in current_regime
+                    is_kr_winter = "WINTER" in current_regime
                 
                 # 미국 및 국내 종목별 랭킹 딕셔너리 개별 작성
                 us_rank_dict = {ticker: idx + 1 for idx, ticker in enumerate(alpha_results_us.index)}
@@ -1052,7 +1078,8 @@ if __name__ == "__main__":
                         
                     ticker_desc_name = alpha_results.at[ticker_name, 'Name'] if 'Name' in alpha_results.columns else ticker_name
                     
-                    if is_winter:
+                    is_this_winter = is_us_winter if is_us_stock else is_kr_winter
+                    if is_this_winter:
                         # 겨울 국면일 경우 무조건 전량 현금화
                         rebal_data.append({
                             "Ticker": ticker_name,
@@ -1157,7 +1184,7 @@ if __name__ == "__main__":
                 log_info(f"  * 국내 주식 (KRW): 예수금 {cash_balance_krw:,.0f}원 | 주식 {current_kr_value_krw:,.0f}원 | 총자산 {total_kr_assets_krw:,.0f}원 (종목당 목표 {target_val_per_stock_krw:,.0f}원)")
                 
                 # 2단계: 신규 매수 편입 종목 선정 (미국/한국 시장별로 각각 독립적으로 슬롯 충전)
-                if not is_winter:
+                if not is_us_winter:
                     # 미국 주식 충전 (가용 슬롯: 5 - kept_us_symbols)
                     us_slots = 5 - len(kept_us_symbols)
                     if us_slots > 0:
@@ -1203,8 +1230,8 @@ if __name__ == "__main__":
                                         "Diff_Value(KRW)": target_qty * price_original * usd_krw
                                     })
                                     
-                    # 국내 주식 충전 (가용 슬롯: 5 - kept_kr_symbols)
-                    kr_slots = 5 - len(kept_kr_symbols)
+                    # 국내 주식 충전 (가용 슬롯: 5 - kept_kr_symbols, 겨울 국면일 땐 0으로 제한)
+                    kr_slots = 0 if is_kr_winter else (5 - len(kept_kr_symbols))
                     if kr_slots > 0:
                         log_info(f"[국내 포트폴리오] 신규 편입 가능 슬롯: {kr_slots}개")
                         top_picks_kr = alpha_results_kr.head(5).index
