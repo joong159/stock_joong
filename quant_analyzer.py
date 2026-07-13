@@ -1324,10 +1324,58 @@ if __name__ == "__main__":
                     print(print_df.to_string())
                     print("="*60 + "\n")
                     
-                    # 💡 퀀트 추천 포트폴리오 노션 동기화 목록 생성 및 국장/미장 랭킹 동기화
+                    # 💡 퀀트 추천 포트폴리오 및 실시간 보유 잔고 노션 동기화
                     try:
                         import threading
-                        from notion_sync import sync_recommended_portfolio_to_notion, sync_rankings_to_notion
+                        from notion_sync import sync_recommended_portfolio_to_notion, sync_rankings_to_notion, sync_holdings_to_notion
+                        
+                        # 0. 실시간 보유 잔고 현황 동기화
+                        try:
+                            holdings_list = []
+                            for item in toss_holdings:
+                                sym = item.get("symbol")
+                                qty = float(item.get("quantity", 0.0))
+                                price = float(item.get("lastPrice", 0.0))
+                                currency = item.get("currency", "KRW")
+                                
+                                name = sym
+                                for t in alpha_results.index:
+                                    if get_toss_symbol(t) == sym:
+                                        name = alpha_results.at[t, 'Name'] if 'Name' in alpha_results.columns else t
+                                        break
+                                        
+                                avg_buy_price = float(item.get("averagePurchasePrice", 0.0))
+                                pl_dict = item.get("profitLoss", {})
+                                if pl_dict:
+                                    pl_rate = float(pl_dict.get("rate", 0.0)) * 100.0
+                                else:
+                                    if avg_buy_price > 0.0:
+                                        pl_rate = ((price - avg_buy_price) / avg_buy_price) * 100.0
+                                    else:
+                                        pl_rate = 0.0
+                                        
+                                avg_buy_price_krw = avg_buy_price * usd_krw if currency == "USD" else avg_buy_price
+                                purchase_val_krw = qty * avg_buy_price_krw
+                                if purchase_val_krw <= 0.0:
+                                    price_krw = price * usd_krw if currency == "USD" else price
+                                    purchase_val_krw = qty * price_krw
+                                    
+                                price_krw = price * usd_krw if currency == "USD" else price
+                                val_krw = qty * price_krw
+                                
+                                holdings_list.append((sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency))
+                                
+                            total_cash_val = cash_balance_krw + (cash_balance_usd * usd_krw)
+                            stock_valuation = (current_us_value_usd * usd_krw) + current_kr_value_krw
+                            total_assets = total_cash_val + stock_valuation
+                            
+                            threading.Thread(
+                                target=sync_holdings_to_notion, 
+                                args=(holdings_list, total_assets, (total_cash_val, cash_balance_krw, cash_balance_usd), stock_valuation, usd_krw),
+                                daemon=False
+                            ).start()
+                        except Exception as ex_holdings:
+                            print(f"[Notion Holdings Sync Error] {ex_holdings}")
                         
                         # 1. 추천 포트폴리오 (액션 포함)
                         recommend_list = []
