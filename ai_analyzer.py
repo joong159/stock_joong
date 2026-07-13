@@ -185,24 +185,24 @@ def generate_trading_analysis_report():
     
     trade_table_markdown = "\n".join(trade_text_lines)
 
-    # 시장 국면 계절 로드
+    # 시장 국면 계절 로드 (Supabase 동기화 반영)
     regime = "알 수 없음 (분석 대기 중)"
-    if os.path.exists(".market_regime.txt"):
-        try:
-            with open(".market_regime.txt", "r", encoding="utf-8") as f:
-                regime_val = f.read().strip()
-                if regime_val == "SPRING":
-                    regime = "🌸 봄 (SPRING) - 성장국면"
-                elif regime_val == "SUMMER":
-                    regime = "☀️ 여름 (SUMMER) - 과열국면"
-                elif regime_val == "FALL":
-                    regime = "🍁 가을 (FALL) - 쇠퇴국면"
-                elif regime_val == "WINTER":
-                    regime = "❄️ 겨울 (WINTER) - 위축국면"
-                else:
-                    regime = regime_val
-        except Exception:
-            pass
+    try:
+        import portfolio_state
+        regime_data = portfolio_state.load_market_regime()
+        
+        def format_reg(val):
+            if "SPRING" in val: return "🌸 봄 (SPRING) - 성장국면"
+            if "SUMMER" in val: return "☀️ 여름 (SUMMER) - 과열국면"
+            if "FALL" in val or "AUTUMN" in val: return "🍁 가을 (FALL) - 쇠퇴국면"
+            if "WINTER" in val: return "❄️ 겨울 (WINTER) - 위축국면"
+            return val
+            
+        regime_us = regime_data.get("US", "UNKNOWN")
+        regime_kr = regime_data.get("KR", "UNKNOWN")
+        regime = f"미국 시장(S&P500): {format_reg(regime_us)}, 한국 시장(KRX): {format_reg(regime_kr)}"
+    except Exception:
+        pass
 
     # 주요 시장 뉴스 조회
     news_items, _ = get_notion_market_news()

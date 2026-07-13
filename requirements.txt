@@ -1,0 +1,12 @@
+requests
+pandas
+openpyxl
+yfinance
+matplotlib
+google-generativeai
+transformers
+torch
+python-dotenv
+FinanceDataReader
+colorama
+nltk

@@ -1,0 +1,75 @@
+name: Auto Quant Rebalancing & News Sync
+
+on:
+  schedule:
+    # 30분마다 실행 (UTC 기준)
+    - cron: '*/30 * * * *'
+  workflow_dispatch: # 수동 실행 버튼 제공
+
+permissions:
+  contents: write # 상태 파일(.portfolio_state.json, .market_regime.txt) 커밋/푸시 권한
+
+jobs:
+  run-quant-engine:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: true
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Cache Pip Dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Cache HuggingFace Models
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/huggingface
+          key: ${{ runner.os }}-huggingface-${{ hashFiles('**/quant_analyzer.py') }}
+          restore-keys: |
+            ${{ runner.os }}-huggingface-
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Run Quant Analyzer
+        env:
+          TOSS_CLIENT_ID: ${{ secrets.TOSS_CLIENT_ID }}
+          TOSS_CLIENT_SECRET: ${{ secrets.TOSS_CLIENT_SECRET }}
+          TOSS_BASE_URL: ${{ secrets.TOSS_BASE_URL || 'https://openapi.tossinvest.com' }}
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: |
+          if [ "${{ secrets.EXECUTE_TRADES }}" = "true" ]; then
+            python quant_analyzer.py --execute
+          else
+            python quant_analyzer.py
+          fi
+
+      - name: Run News Sync
+        env:
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+        run: python sync_news_hourly.py
+
+      - name: Commit and Push Portfolio State
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add -f .portfolio_state.json .market_regime.txt
+          git commit -m "Auto-update portfolio state and market regime [skip ci]" || echo "No changes to commit"
+          git push

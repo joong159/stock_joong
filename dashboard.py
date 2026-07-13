@@ -43,17 +43,103 @@ def parse_yfinance_news_article(article):
             "link": link,
             "time": time_val
         }
+    return {}
+
+def fetch_stock_news(symbol, name):
+    import yfinance as yf
+    import urllib.request
+    import urllib.parse
+    import xml.etree.ElementTree as ET
+    import datetime
     
-    title = article.get("title", "")
-    publisher = article.get("publisher", "")
-    link = article.get("link", "")
-    time_val = article.get("providerPublishTime", 0)
-    return {
-        "title": title,
-        "publisher": publisher,
-        "link": link,
-        "time": time_val
-    }
+    is_kr = symbol.endswith('.KS') or symbol.endswith('.KQ') or (len(symbol) == 6 and symbol.isdigit())
+    
+    # 1. 국장인 경우 Google News RSS로 즉시 이동
+    if is_kr:
+        query = name
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as response:
+                xml_data = response.read()
+                root = ET.fromstring(xml_data)
+                items = []
+                for item in root.findall(".//item")[:2]: # 최대 2개 뉴스
+                    title = item.find("title").text
+                    link = item.find("link").text
+                    pub_date = item.find("pubDate").text
+                    source = item.find("source").text if item.find("source") is not None else "Google News"
+                    try:
+                        # Sat, 04 Jul 2026 00:00:00 GMT / GMT or local GMT representations
+                        clean_pub_date = pub_date.split(" GMT")[0].split(" UTC")[0]
+                        dt = datetime.datetime.strptime(clean_pub_date, "%a, %d %b %Y %H:%M:%S")
+                        timestamp = int(dt.timestamp())
+                    except Exception:
+                        timestamp = int(datetime.datetime.now().timestamp())
+                    items.append({
+                        "symbol": symbol,
+                        "title": title,
+                        "publisher": source,
+                        "link": link,
+                        "time": timestamp
+                    })
+                return items
+        except Exception as e:
+            print(f"[Google News RSS Error] Failed for {name}: {e}")
+            return []
+            
+    # 2. 미장인 경우 yfinance 뉴스 시도
+    else:
+        try:
+            ticker_news = yf.Ticker(symbol).news
+            if ticker_news:
+                items = []
+                for art in ticker_news[:2]:
+                    parsed = parse_yfinance_news_article(art)
+                    if parsed.get("title"):
+                        items.append({
+                            "symbol": symbol,
+                            "title": parsed["title"],
+                            "publisher": parsed["publisher"],
+                            "link": parsed["link"],
+                            "time": parsed["time"]
+                        })
+                return items
+        except Exception as ex:
+            print(f"[yfinance News Error] Failed for {symbol}: {ex}")
+            
+        # yfinance 실패 시 Google News RSS로 폴백
+        query = symbol
+        encoded_query = urllib.parse.quote(query)
+        url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as response:
+                xml_data = response.read()
+                root = ET.fromstring(xml_data)
+                items = []
+                for item in root.findall(".//item")[:2]:
+                    title = item.find("title").text
+                    link = item.find("link").text
+                    pub_date = item.find("pubDate").text
+                    source = item.find("source").text if item.find("source") is not None else "Google News"
+                    try:
+                        clean_pub_date = pub_date.split(" GMT")[0].split(" UTC")[0]
+                        dt = datetime.datetime.strptime(clean_pub_date, "%a, %d %b %Y %H:%M:%S")
+                        timestamp = int(dt.timestamp())
+                    except Exception:
+                        timestamp = int(datetime.datetime.now().timestamp())
+                    items.append({
+                        "symbol": symbol,
+                        "title": title,
+                        "publisher": source,
+                        "link": link,
+                        "time": timestamp
+                    })
+                return items
+        except Exception:
+            return []
 
 class LiveDashboardApp:
     def __init__(self, root):
@@ -346,11 +432,9 @@ class LiveDashboardApp:
                 
                 current_regime = classify_market_regime(market_df)
                 
-                # 파일에 기록 (JSON 형식으로 저장)
-                import json
-                regime_json = json.dumps({"US": current_regime[0], "KR": current_regime[1]}, ensure_ascii=False)
-                with open(".market_regime.txt", "w", encoding="utf-8") as f:
-                    f.write(regime_json)
+                # 파일 및 Supabase에 기록 (JSON 형식으로 저장)
+                import portfolio_state
+                portfolio_state.save_market_regime({"US": current_regime[0], "KR": current_regime[1]})
                     
                 # GUI 갱신 요청
                 self.root.after(0, self.fetch_live_data)
@@ -369,14 +453,18 @@ class LiveDashboardApp:
             if not self.is_offline and self.toss_client:
                 # 1. 실시간 환율 조회
                 usd_krw = self.toss_client.get_exchange_rate(base="USD", quote="KRW")
-                # 2. 예수금 조회
-                cash_balance = self.toss_client.get_buying_power(currency="KRW")
+                # 2. 예수금 조회 (원화 및 달러 통합 환산 적용)
+                cash_krw = self.toss_client.get_buying_power(currency="KRW")
+                cash_usd = self.toss_client.get_buying_power(currency="USD")
+                cash_balance = cash_krw + (cash_usd * usd_krw)
                 # 3. 실시간 보유 잔고 조회
                 toss_holdings = self.toss_client.get_holdings()
             else:
                 # 시뮬레이터 모드: 로컬 포트폴리오 상태에서 보유 종목 불러오기
                 state = load_portfolio_state()
                 usd_krw = 1350.0
+                cash_krw = 50.0
+                cash_usd = 0.0
                 cash_balance = 50.0 # 기본 예수금
                 toss_holdings = []
                 for sym, info in state.items():
@@ -474,59 +562,52 @@ class LiveDashboardApp:
             news_list = []
             for h in holdings_list:
                 sym = h[0]
+                name = h[1]
                 try:
-                    ticker_news = yf.Ticker(sym).news
+                    ticker_news = fetch_stock_news(sym, name)
                     if ticker_news:
-                        for art in ticker_news[:2]:  # 최대 2개 뉴스 수집
-                            parsed = parse_yfinance_news_article(art)
-                            if parsed.get("title"):
-                                news_list.append({
-                                    "symbol": sym,
-                                    "title": parsed["title"],
-                                    "publisher": parsed["publisher"],
-                                    "link": parsed["link"],
-                                    "time": parsed["time"]
-                                })
+                        news_list.extend(ticker_news)
                 except Exception as ex:
                     print(f"[News Fetch Warning] Failed for {sym}: {ex}")
             
             total_assets = cash_balance + stock_valuation
             
             # 메인 스레드 안전 업데이트
-            self.root.after(0, self.update_gui_values, total_assets, cash_balance, stock_valuation, usd_krw, holdings_list, news_list)
+            self.root.after(0, self.update_gui_values, total_assets, (cash_balance, cash_krw, cash_usd), stock_valuation, usd_krw, holdings_list, news_list)
         except Exception as e:
             self.root.after(0, self.show_error_message, str(e))
             
     def update_gui_values(self, total, cash, stock_val, rate, holdings_list, news_list=[]):
         self.var_total_assets.set(f"₩ {total:,.0f}")
-        self.var_cash.set(f"₩ {cash:,.0f}")
+        if isinstance(cash, tuple):
+            cash_val, cash_krw, cash_usd = cash
+            self.var_cash.set(f"₩ {cash_val:,.0f}")
+            # 하단 상태 표시줄에 상세 예수금 내역 출력
+            self.var_countdown.set(f"예수금 상세: 원화 {cash_krw:,.0f}원 | 달러 $ {cash_usd:,.2f} USD")
+        else:
+            self.var_cash.set(f"₩ {cash:,.0f}")
         self.var_stock_val.set(f"₩ {stock_val:,.0f}")
         self.var_exchange_rate.set(f"₩ {rate:,.2f}")
         
-        # 시장 국면(계절) 로드 및 표시
+        # 시장 국면(계절) 로드 및 표시 (Supabase 동기화 반영)
         regime = "분석 대기 중"
-        if os.path.exists(".market_regime.txt"):
-            try:
-                with open(".market_regime.txt", "r", encoding="utf-8") as f:
-                    regime_content = f.read().strip()
-                    
-                    def format_reg(val):
-                        if "SPRING" in val: return "🌸 봄 (SPRING)"
-                        if "SUMMER" in val: return "☀️ 여름 (SUMMER)"
-                        if "FALL" in val or "AUTUMN" in val: return "🍁 가을 (FALL)"
-                        if "WINTER" in val: return "❄️ 겨울 (WINTER)"
-                        return val
-                        
-                    if regime_content.startswith("{"):
-                        import json
-                        regime_data = json.loads(regime_content)
-                        regime_us = regime_data.get("US", "UNKNOWN")
-                        regime_kr = regime_data.get("KR", "UNKNOWN")
-                        regime = f"미국: {format_reg(regime_us)} | 한국: {format_reg(regime_kr)}"
-                    else:
-                        regime = format_reg(regime_content)
-            except Exception:
-                pass
+        try:
+            import portfolio_state
+            regime_data = portfolio_state.load_market_regime()
+            
+            def format_reg(val):
+                if "SPRING" in val: return "🌸 봄 (SPRING)"
+                if "SUMMER" in val: return "☀️ 여름 (SUMMER)"
+                if "FALL" in val or "AUTUMN" in val: return "🍁 가을 (FALL)"
+                if "WINTER" in val: return "❄️ 겨울 (WINTER)"
+                return val
+                
+            regime_us = regime_data.get("US", "UNKNOWN")
+            regime_kr = regime_data.get("KR", "UNKNOWN")
+            regime = f"미국: {format_reg(regime_us)} | 한국: {format_reg(regime_kr)}"
+        except Exception as e:
+            print(f"[Dashboard Regime Load Warning] {e}")
+
         self.var_market_regime.set(regime)
         
         # 목록 지우고 재작성

@@ -68,11 +68,10 @@ def translate_via_google_fallback(text):
         print(f"[Google Translate Fallback Warning] Failed: {e}")
     return text
 
-def translate_headline_to_korean(headline):
+def translate_headline_to_korean(headline, fast=False):
     """
     제미나이 2.5 플래시 모델을 활용하여 영문 뉴스 헤드라인을 자연스럽고 간결한 한국어로 번역합니다.
-    - API 요청 수 절약 및 20회/일 무료 한도 보존을 위해 캐시를 탑재했습니다.
-    - 제미나이 Quota(할당량) 초과 혹은 API 오류 발생 시 무료 구글 번역 서비스로 즉각 Fallback 합니다.
+    - fast=True 이거나 API 키가 없는 경우, 구글 번역 fallback을 사용하여 매우 신속하게 응답하고 API 할당량을 대폭 아낍니다.
     """
     if not headline:
         return headline
@@ -82,8 +81,7 @@ def translate_headline_to_korean(headline):
         return cache[headline]
         
     api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        # API 키가 없으면 구글 번역 fallback 실행
+    if fast or not api_key:
         translated = translate_via_google_fallback(headline)
         cache[headline] = translated
         save_translation_cache(cache)
@@ -94,7 +92,7 @@ def translate_headline_to_korean(headline):
         genai.configure(api_key=api_key)
         model = genai.GenerativeModel("gemini-2.5-flash")
         prompt = f"Translate the following financial news headline to Korean in a natural, concise, professional analyst style. Output ONLY the Korean translation, with no quotes and no extra comments: {headline}"
-        response = model.generate_content(prompt)
+        response = model.generate_content(prompt, request_options={"timeout": 10.0})
         if response and response.text:
             translated = response.text.strip().replace('"', '')
             cache[headline] = translated
@@ -110,6 +108,59 @@ def translate_headline_to_korean(headline):
         return translated
         
     return headline
+
+def get_korean_company_name(symbol):
+    # Mapping for common tickers to clean Korean names
+    korean_names = {
+        # KRX
+        '005930.KS': '삼성전자', '005930': '삼성전자',
+        '000660.KS': 'SK하이닉스', '000660': 'SK하이닉스',
+        '005380.KS': '현대차', '005380': '현대차',
+        '000270.KS': '기아', '000270': '기아',
+        '035420.KS': 'NAVER', '035420': 'NAVER',
+        '035720.KS': '카카오', '035720': '카카오',
+        '068270.KS': '셀트리온', '068270': '셀트리온',
+        '005490.KS': 'POSCO홀딩스', '005490': 'POSCO홀딩스',
+        '207940.KS': '삼성바이오로직스', '207940': '삼성바이오로직스',
+        '051910.KS': 'LG화학', '051910': 'LG화학',
+        # US
+        'AAPL': '애플', 'MSFT': '마이크로소프트', 'GOOGL': '알파벳(구글)', 'GOOG': '알파벳(구글)',
+        'AMZN': '아마존', 'NVDA': '엔비디아', 'TSLA': '테슬라', 'META': '메타(페이스북)',
+        'BRK.B': '버크셔해서웨이', 'BRK-B': '버크셔해서웨이', 'BRK-A': '버크셔해서웨이',
+        'JNJ': '존슨앤드존슨', 'V': '비자', 'PG': '프록터앤갬블(P&G)', 'JPM': 'JP모건체이스',
+        'UNH': '유나이티드헬스', 'HD': '홈디포', 'MA': '마스터카드', 'BAC': '뱅크오브아메리카',
+        'DIS': '디즈니', 'ADBE': '어도비', 'NFLX': '넷플릭스', 'KO': '코카콜라',
+        'PEP': '펩시코', 'T': 'AT&T', 'VZ': '버라이즌', 'INTC': '인텔',
+        'CSCO': '시스코', 'MRK': '머크', 'PFE': '화이자', 'WMT': '월마트',
+        'LLY': '일라이릴리', 'AVGO': '브로드컴', 'COST': '코스트코', 'AMD': 'AMD',
+        'CRM': '세일즈포스', 'NKE': '나이키', 'MCD': '맥도날드', 'TXN': '텍사스인스트루먼트',
+        'QCOM': '퀄컴', 'HON': '하니웰', 'GE': '제너럴일렉트릭', 'XOM': '엑슨모빌',
+        'CVX': '쉐브론', 'WFC': '웰스파고', 'SNDK': '샌디스크', 'PANW': '팔로알토네트웍스',
+        'VLO': '발레로에너지', 'MTD': '메틀러토레도', 'MAS': '마스코'
+    }
+    
+    clean_sym = symbol.strip().upper()
+    if clean_sym in korean_names:
+        return korean_names[clean_sym]
+        
+    # Fallback to fetching company name from yahoo search api
+    try:
+        import urllib.request
+        import json
+        req = urllib.request.Request(
+            f"https://query2.finance.yahoo.com/v1/finance/search?q={clean_sym}",
+            headers={'User-Agent': 'Mozilla/5.0'}
+        )
+        with urllib.request.urlopen(req, timeout=2) as res:
+            data = json.loads(res.read())
+            quotes = data.get('quotes', [])
+            if quotes:
+                eng_name = quotes[0].get('longname') or quotes[0].get('shortname') or symbol
+                return eng_name.replace("Inc.", "").replace("Corp.", "").replace("Corporation", "").replace("Co.", "").strip()
+    except Exception:
+        pass
+        
+    return symbol
 
 def find_database_by_name(name):
     """
@@ -248,14 +299,13 @@ def sync_holdings_to_notion(holdings_list, total_assets=None, cash_balance=None,
         if total_assets is not None:
             update_notion_kpi_card(total_assets, cash_balance, stock_valuation, usd_krw, holdings_list)
 
-        # 시장 국면 로드하여 노션 페이지 스타일 동적 업데이트
-        if os.path.exists(".market_regime.txt"):
-            try:
-                with open(".market_regime.txt", "r", encoding="utf-8") as f:
-                    regime_val = f.read().strip()
-                    update_notion_regime_style(regime_val)
-            except Exception:
-                pass
+        # 시장 국면 로드하여 노션 페이지 스타일 동적 업데이트 (Supabase 동기화 반영)
+        try:
+            import portfolio_state
+            regime_val = portfolio_state.load_market_regime()
+            update_notion_regime_style(regime_val)
+        except Exception:
+            pass
 
         # 1. 노션 데이터베이스의 기존 페이지 조회
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -354,7 +404,7 @@ def sync_holdings_to_notion(holdings_list, total_assets=None, cash_balance=None,
     except Exception as e:
         print(f"[Notion Sync Error] {e}")
 
-def sync_market_news_to_notion(news_list):
+def sync_market_news_to_notion(news_list, fast_translate=False):
     """
     주요 종목 뉴스 및 센티먼트 리스트를 노션 데이터베이스('📰 주요 시장 뉴스')와 동기화합니다.
     """
@@ -386,17 +436,50 @@ def sync_market_news_to_notion(news_list):
         except Exception:
             pass
 
-        # 1. 기존의 노션 뉴스 아이템 전부 조회 후 아카이브 (최신 뉴스 위주 유지를 위함)
+        # 1. 기존의 노션 뉴스 아이템 조회 및 72시간 지난 뉴스 아카이브
+        existing_links = set()
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
         res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+        
+        now = datetime.datetime.now()
         if res.status_code == 200:
             results = res.json().get("results", [])
             for page in results:
                 page_id = page.get("id")
-                requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                props = page.get("properties", {})
                 
-        # 2. 신규 뉴스 아이템 생성
+                # 링크 수집
+                link_url = props.get("Link", {}).get("url")
+                if link_url:
+                    existing_links.add(link_url)
+                    
+                # 날짜 검사하여 72시간(3일) 지난 기사는 삭제(아카이브)
+                date_prop = props.get("Date", {}).get("date")
+                if date_prop and date_prop.get("start"):
+                    try:
+                        date_str = date_prop["start"]
+                        if "T" in date_str:
+                            # Parse ISO format (handling optional offset)
+                            clean_date_str = date_str.split("+")[0].split("Z")[0]
+                            dt = datetime.datetime.fromisoformat(clean_date_str)
+                        else:
+                            dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
+                            
+                        # 3일(72시간) 초과 시 아카이브 처리
+                        if (now - dt).total_seconds() > 3 * 24 * 3600:
+                            requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                            if link_url in existing_links:
+                                existing_links.remove(link_url)
+                    except Exception as date_err:
+                        print(f"[Notion News Date Check Warning] {date_err}")
+
+        # 2. 신규 뉴스 아이템 생성 (중복 링크 제외)
+        inserted_count = 0
         for art in news_list:
+            link = art.get("link", "")
+            if link and link in existing_links:
+                continue # 중복 뉴스 패스!
+                
             create_url = "https://api.notion.com/v1/pages"
             
             # 시간 파싱
@@ -412,44 +495,90 @@ def sync_market_news_to_notion(news_list):
                 
             # 영문 뉴스 한글 번역
             raw_title = art.get("title", "뉴스 헤드라인")
-            korean_title = translate_headline_to_korean(raw_title)
+            korean_title = translate_headline_to_korean(raw_title, fast=fast_translate)
             
             # 국장/미장 시장 분류
             sym = art.get("symbol", "")
             is_us = not (sym.endswith('.KS') or sym.endswith('.KQ'))
             market_val = "S&P500" if is_us else "KRX"
             
+            # 회사 한국어 이름과 코드 통합 표기
+            company_name = get_korean_company_name(sym)
+            stock_display = f"{company_name} ({sym})" if company_name != sym else sym
+            
             payload = {
                 "parent": {"database_id": db_id},
                 "properties": {
                     "Name": {"title": [{"text": {"content": korean_title}}]},
-                    "Stock": {"rich_text": [{"text": {"content": sym}}]},
+                    "Stock": {"rich_text": [{"text": {"content": stock_display}}]},
                     "Publisher": {"rich_text": [{"text": {"content": art.get("publisher", "")}}]},
-                    "Link": {"url": art.get("link", "")},
+                    "Link": {"url": link},
                     "Date": {"date": {"start": date_str}},
                     "Market": {"select": {"name": market_val}}
                 }
             }
-            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            if res_create.status_code in [200, 201]:
+                inserted_count += 1
+                if link:
+                    existing_links.add(link)
             
-        print(f"[Notion News] 성공적으로 {len(news_list)}개의 시장 뉴스를 동기화 완료했습니다.")
+        print(f"[Notion News] 성공적으로 {inserted_count}개의 새로운 시장 뉴스를 동기화했습니다. (중복 스킵 완료)")
     except Exception as e:
         print(f"[Notion News Error] {e}")
+
+def ensure_recommend_db_properties(db_id):
+    """
+    💡 퀀트 추천 포트폴리오 데이터베이스에 액션(Action), 수치형 비중(Weight (%)), 보유금 대비 비중 (%) 속성이
+    존재하고 올바른 타입으로 정의되어 있는지 확인하고 자동 추가/수정합니다.
+    """
+    url = f"https://api.notion.com/v1/databases/{db_id}"
+    payload = {
+        "properties": {
+            "Action": {
+                "select": {
+                    "options": [
+                        {"name": "BUY", "color": "green"},
+                        {"name": "HOLD", "color": "yellow"},
+                        {"name": "SELL", "color": "red"}
+                    ]
+                }
+            },
+            "Weight (%)": {
+                "number": {
+                    "format": "percent"
+                }
+            },
+            "보유금 대비 비중 (%)": {
+                "number": {
+                    "format": "percent"
+                }
+            },
+            "Invest Amount (₩)": None  # 기존 투자금액 속성 제거
+        }
+    }
+    try:
+        requests.patch(url, headers=HEADERS, json=payload, timeout=10)
+    except Exception as e:
+        print(f"[Notion Properties Warning] Failed to update recommended portfolio schema: {e}")
 
 def sync_recommended_portfolio_to_notion(portfolio_list):
     """
     김민겸 퀀트 추천 포트폴리오를 노션 데이터베이스('💡 퀀트 추천 포트폴리오')와 완벽 동기화합니다.
-    - portfolio_list: {"symbol": sym, "name": name, "market": mkt, "industry": ind, "score": score, "weight": weight, "amount": amt} 리스트
+    - portfolio_list: {"symbol": sym, "name": name, "market": mkt, "industry": ind, "score": score, "weight": weight, "amount": amt, "action": act} 리스트
     """
     if not NOTION_TOKEN:
         return
         
     db_id = find_database_by_name("💡 퀀트 추천 포트폴리오")
     if not db_id:
-        print("[Notion Recommend] '퀀트 추천 포트폴리오' 데이터베이스를 찾을 수 없어 동기화를 건너뜁니다.")
+        print("[Notion Recommend] '퀀트 추천 포트폴리오' 데이터베이스를 찾을 수 없어 동기화를 건너뜜니다.")
         return
         
     try:
+        # 데이터베이스 속성(스키마) 유효성 보장 및 보강
+        ensure_recommend_db_properties(db_id)
+        
         # 1. 기존 노션 추천 포트폴리오 항목 전부 아카이브 (최신 추천 위주 유지를 위함)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
         res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
@@ -470,23 +599,36 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             score = item.get("score", 0.0)
             weight = item.get("weight", 0.0)
             amount = item.get("amount", 0.0)
+            action = item.get("action", "HOLD")
+            
+            # 회사 한국어 이름과 코드 통합 표기
+            company_name = get_korean_company_name(sym)
+            clean_name = company_name if company_name != sym else name
+            stock_display = f"{company_name} ({sym})" if company_name != sym else sym
             
             currency = "USD" if market == "SP500" else "KRW"
             score_str = f"{score:+.2f}"
             weight_str = f"{weight:.2f}%"
-            amount_str = f"₩ {amount:,.0f}"
+            # 투자금액 대신 보유금 대비 비중 텍스트 형식으로 노출
+            amount_str = f"보유금의 {weight:.2f}%"
+            
+            # 수치형 비중 및 액션 매핑
+            weight_val = weight / 100.0
             
             payload = {
                 "parent": {"database_id": db_id},
                 "properties": {
-                    "Name": {"title": [{"text": {"content": name}}]},
-                    "Symbol": {"rich_text": [{"text": {"content": sym}}]},
+                    "Name": {"title": [{"text": {"content": clean_name}}]},
+                    "Symbol": {"rich_text": [{"text": {"content": stock_display}}]},
                     "Market": {"rich_text": [{"text": {"content": market}}]},
                     "Industry": {"rich_text": [{"text": {"content": industry}}]},
                     "NewsScore": {"rich_text": [{"text": {"content": score_str}}]},
                     "Weight": {"rich_text": [{"text": {"content": weight_str}}]},
                     "InvestAmount": {"rich_text": [{"text": {"content": amount_str}}]},
-                    "Currency": {"select": {"name": currency}}
+                    "Currency": {"select": {"name": currency}},
+                    "Action": {"select": {"name": action}},
+                    "Weight (%)": {"number": weight_val},
+                    "보유금 대비 비중 (%)": {"number": weight_val}
                 }
             }
             requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
@@ -494,6 +636,128 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
         print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다.")
     except Exception as e:
         print(f"[Notion Recommend Error] {e}")
+
+def ensure_ranking_db_properties(db_id):
+    """
+    🏆 퀀트 종목 랭킹 데이터베이스에 날짜(Date) 속성이 존재하고 올바른 타입으로 정의되어 있는지 확인하고 자동 추가합니다.
+    """
+    url = f"https://api.notion.com/v1/databases/{db_id}"
+    payload = {
+        "properties": {
+            "Date": {
+                "date": {}
+            }
+        }
+    }
+    try:
+        requests.patch(url, headers=HEADERS, json=payload, timeout=10)
+    except Exception as e:
+        print(f"[Notion Properties Warning] Failed to update ranking database schema: {e}")
+
+def sync_rankings_to_notion(rankings_list):
+    """
+    국장 및 미장 종목 랭킹 리스트를 각각 '🏆 국장 퀀트 종목 랭킹' 및 '🏆 미장 퀀트 종목 랭킹' 데이터베이스에 동기화합니다.
+    - rankings_list: [{"name": name, "symbol": sym, "market": mkt, "rank": rank, "score": score, "industry": ind}] 리스트
+    """
+    if not NOTION_TOKEN:
+        return
+        
+    db_kr_id = find_database_by_name("🏆 국장 퀀트 종목 랭킹")
+    db_us_id = find_database_by_name("🏆 미장 퀀트 종목 랭킹")
+    
+    if not db_kr_id or not db_us_id:
+        print("[Notion Ranking] 데이터베이스를 찾을 수 없어 랭킹 동기화를 건너뜁니다.")
+        return
+        
+    try:
+        # 두 데이터베이스 속성 보강
+        ensure_ranking_db_properties(db_kr_id)
+        ensure_ranking_db_properties(db_us_id)
+        
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        
+        # 국장 및 미장 아이템 분류
+        kr_items = [item for item in rankings_list if item.get("market") == "KRX"]
+        us_items = [item for item in rankings_list if item.get("market") != "KRX"]
+        
+        # 1. 오늘 날짜로 이미 동기화된 항목이 있다면 중복 제거를 위해 아카이브 처리
+        for db_id in [db_kr_id, db_us_id]:
+            query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
+            filter_payload = {
+                "filter": {
+                    "property": "Date",
+                    "date": {
+                        "equals": today_str
+                    }
+                },
+                "page_size": 100
+            }
+            res = requests.post(query_url, headers=HEADERS, json=filter_payload, timeout=10)
+            if res.status_code == 200:
+                results = res.json().get("results", [])
+                for page in results:
+                    page_id = page.get("id")
+                    requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                    
+        # 2. 국장 신규 랭킹 생성 (오늘 날짜 부여)
+        # 순위가 정돈되어 들어가도록 Rank 역순(20위부터 1위)으로 생성하여 노션 디폴트 정렬 시 1위가 맨 위로 오도록 함
+        kr_items_sorted = sorted(kr_items, key=lambda x: x.get("rank", 999), reverse=True)
+        for item in kr_items_sorted:
+            create_url = "https://api.notion.com/v1/pages"
+            rank_val = item.get("rank", 0)
+            sym = item.get("symbol", "")
+            name = item.get("name", "")
+            
+            # 회사 한국어 이름과 코드 통합 표기
+            company_name = get_korean_company_name(sym)
+            clean_name = company_name if company_name != sym else name
+            stock_display = f"{company_name} ({sym})" if company_name != sym else sym
+            
+            display_name = f"[{rank_val}위] {clean_name}"
+            payload = {
+                "parent": {"database_id": db_kr_id},
+                "properties": {
+                    "Name": {"title": [{"text": {"content": display_name}}]},
+                    "Symbol": {"rich_text": [{"text": {"content": stock_display}}]},
+                    "Rank": {"number": rank_val},
+                    "Score": {"number": round(item.get("score", 0.0), 4)},
+                    "Industry": {"rich_text": [{"text": {"content": item.get("industry", "")}}]},
+                    "Date": {"date": {"start": today_str}}
+                }
+            }
+            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            
+        # 3. 미장 신규 랭킹 생성 (오늘 날짜 부여)
+        # 순위가 정돈되어 들어가도록 Rank 역순(20위부터 1위)으로 생성
+        us_items_sorted = sorted(us_items, key=lambda x: x.get("rank", 999), reverse=True)
+        for item in us_items_sorted:
+            create_url = "https://api.notion.com/v1/pages"
+            rank_val = item.get("rank", 0)
+            sym = item.get("symbol", "")
+            name = item.get("name", "")
+            
+            # 회사 한국어 이름과 코드 통합 표기
+            company_name = get_korean_company_name(sym)
+            clean_name = company_name if company_name != sym else name
+            stock_display = f"{company_name} ({sym})" if company_name != sym else sym
+            
+            display_name = f"[{rank_val}위] {clean_name}"
+            payload = {
+                "parent": {"database_id": db_us_id},
+                "properties": {
+                    "Name": {"title": [{"text": {"content": display_name}}]},
+                    "Symbol": {"rich_text": [{"text": {"content": stock_display}}]},
+                    "Rank": {"number": rank_val},
+                    "Score": {"number": round(item.get("score", 0.0), 4)},
+                    "Industry": {"rich_text": [{"text": {"content": item.get("industry", "")}}]},
+                    "Date": {"date": {"start": today_str}}
+                }
+            }
+            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            
+        print(f"[Notion Ranking] 국장/미장 각각 랭킹 동기화를 완료했습니다.")
+    except Exception as e:
+        print(f"[Notion Ranking Error] {e}")
 
 def log_trade_to_notion(symbol, name, side, qty, price, val_krw, reason=""):
     """
@@ -564,7 +828,7 @@ def setup_notion_workspace():
                 if prop_val.get("type") == "title":
                     title_list = prop_val.get("title", [])
                     page_title = "".join([t.get("plain_text", "") for t in title_list])
-                    if page_title.strip() == "주식 자동 리밸런싱 대시보드":
+                    if "주식 자동 리밸런싱 대시보드" in page_title:
                         parent_page_id = page.get("id")
                         break
             if parent_page_id:
@@ -690,6 +954,25 @@ def setup_notion_workspace():
                                 {"name": "USD", "color": "blue"}
                             ]
                         }
+                    },
+                    "Action": {
+                        "select": {
+                            "options": [
+                                {"name": "BUY", "color": "green"},
+                                {"name": "HOLD", "color": "yellow"},
+                                {"name": "SELL", "color": "red"}
+                            ]
+                        }
+                    },
+                    "Weight (%)": {
+                        "number": {
+                            "format": "percent"
+                        }
+                    },
+                    "보유금 대비 비중 (%)": {
+                        "number": {
+                            "format": "percent"
+                        }
                     }
                 }
             }
@@ -698,6 +981,54 @@ def setup_notion_workspace():
                 created_count += 1
             else:
                 return f"'💡 퀀트 추천 포트폴리오' 디비 생성 실패: {c_res.text}"
+
+        # 7. '🏆 국장 퀀트 종목 랭킹' 및 '🏆 미장 퀀트 종목 랭킹' 데이터베이스 생성
+        old_ranking_db_id = find_database_by_name("🏆 퀀트 종목 랭킹")
+        if old_ranking_db_id:
+            # 기존 통합 랭킹 DB가 존재하면 깔끔하게 아카이브 처리
+            requests.patch(f"https://api.notion.com/v1/pages/{old_ranking_db_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+
+        kr_ranking_db_id = find_database_by_name("🏆 국장 퀀트 종목 랭킹")
+        if not kr_ranking_db_id:
+            create_url = "https://api.notion.com/v1/databases"
+            db_payload = {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": [{"type": "text", "text": {"content": "🏆 국장 퀀트 종목 랭킹"}}],
+                "properties": {
+                    "Name": {"title": {}},
+                    "Symbol": {"rich_text": {}},
+                    "Rank": {"number": {"format": "number"}},
+                    "Score": {"number": {"format": "number"}},
+                    "Industry": {"rich_text": {}},
+                    "Date": {"date": {}}
+                }
+            }
+            c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
+            if c_res.status_code == 200:
+                created_count += 1
+            else:
+                return f"'🏆 국장 퀀트 종목 랭킹' 디비 생성 실패: {c_res.text}"
+
+        us_ranking_db_id = find_database_by_name("🏆 미장 퀀트 종목 랭킹")
+        if not us_ranking_db_id:
+            create_url = "https://api.notion.com/v1/databases"
+            db_payload = {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": [{"type": "text", "text": {"content": "🏆 미장 퀀트 종목 랭킹"}}],
+                "properties": {
+                    "Name": {"title": {}},
+                    "Symbol": {"rich_text": {}},
+                    "Rank": {"number": {"format": "number"}},
+                    "Score": {"number": {"format": "number"}},
+                    "Industry": {"rich_text": {}},
+                    "Date": {"date": {}}
+                }
+            }
+            c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
+            if c_res.status_code == 200:
+                created_count += 1
+            else:
+                return f"'🏆 미장 퀀트 종목 랭킹' 디비 생성 실패: {c_res.text}"
 
         if created_count > 0:
             return f"성공적으로 {created_count}개의 데이터베이스를 노션 페이지 하위에 생성/연동 완료했습니다!"
@@ -738,7 +1069,7 @@ def decorate_notion_workspace():
                 if prop_val.get("type") == "title":
                     title_list = prop_val.get("title", [])
                     page_title = "".join([t.get("plain_text", "") for t in title_list])
-                    if page_title.strip() == "주식 자동 리밸런싱 대시보드":
+                    if page_title.strip().startswith("주식 자동 리밸런싱 대시보드"):
                         page_id = page.get("id")
                         break
             if page_id:
@@ -747,14 +1078,17 @@ def decorate_notion_workspace():
         if not page_id:
             return "노션에서 '주식 자동 리밸런싱 대시보드' 페이지를 찾을 수 없습니다."
 
-        # 시장 국면 계절에 따른 동적 아이콘/커버 로드
+        # 시장 국면 계절에 따른 동적 아이콘/커버 로드 (Supabase 동기화 반영)
         regime_val = "UNKNOWN"
-        if os.path.exists(".market_regime.txt"):
-            try:
-                with open(".market_regime.txt", "r", encoding="utf-8") as f:
-                    regime_val = f.read().strip()
-            except Exception:
-                pass
+        try:
+            import portfolio_state
+            reg = portfolio_state.load_market_regime()
+            if isinstance(reg, dict):
+                regime_val = reg.get("US", "UNKNOWN")
+            else:
+                regime_val = str(reg)
+        except Exception:
+            pass
 
         regime_styles = {
             "SPRING": {
@@ -806,16 +1140,23 @@ def decorate_notion_workspace():
         }
         requests.patch(page_url, headers=HEADERS, json=page_payload, timeout=10)
 
-        # 3. 기존에 추가된 블록 목록 조회하여 원칙 박스가 이미 있는지 검사
+        # 3. 기존에 추가된 블록 목록 조회하여 원칙 박스와 팁 박스가 이미 있는지 개별 검사
         blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
         b_res = requests.get(blocks_url, headers=HEADERS, timeout=10)
         has_callout = False
+        has_tips = False
         if b_res.status_code == 200:
             blocks = b_res.json().get("results", [])
             for block in blocks:
                 if block.get("type") == "callout":
-                    has_callout = True
-                    break
+                    c_text = ""
+                    rich_text = block.get("callout", {}).get("rich_text", [])
+                    if rich_text:
+                        c_text = rich_text[0].get("text", {}).get("content", "")
+                    if "3대 절대 원칙" in c_text or "절대 원칙" in c_text:
+                        has_callout = True
+                    if "대시보드 뷰 커스텀" in c_text or "뷰 커스텀 팁" in c_text:
+                        has_tips = True
         
         # 4. 원칙 콜아웃 박스 및 소개글 추가 (없을 경우에만)
         if not has_callout:
@@ -871,6 +1212,30 @@ def decorate_notion_workspace():
                             "icon": {"type": "emoji", "emoji": "🛡️"},
                             "color": "purple_background"
                         }
+                    }
+                ]
+            }
+            requests.patch(blocks_url, headers=HEADERS, json=children_payload, timeout=10)
+            
+        # 5. 팁 콜아웃 박스 추가 (없을 경우에만)
+        if not has_tips:
+            tips_payload = {
+                "children": [
+                    {
+                        "object": "block",
+                        "type": "callout",
+                        "callout": {
+                            "rich_text": [
+                                {
+                                    "type": "text",
+                                    "text": {
+                                        "content": "📅 대시보드 뷰 커스텀 팁\n1. 거래 일지 / 뉴스 캘린더화: 데이터베이스 상단 '+' 버튼 클릭 -> '캘린더' 선택 (기준 날짜: Date)\n2. 주요시장뉴스 국장/미장 분리: 탭 복사 후 필터 -> Market을 'KRX' 또는 'S&P500'으로 필터링\n3. 퀀트 랭킹 캘린더: 국장/미장 퀀트 랭킹도 상단 '+' 클릭 -> '캘린더' 선택 시 날짜별로 보기가 바뀝니다."
+                                    }
+                                }
+                            ],
+                            "icon": {"type": "emoji", "emoji": "💡"},
+                            "color": "yellow_background"
+                        }
                     },
                     {
                         "object": "block",
@@ -879,11 +1244,9 @@ def decorate_notion_workspace():
                     }
                 ]
             }
-            requests.patch(blocks_url, headers=HEADERS, json=children_payload, timeout=10)
-            return "노션 페이지 디자인 꾸미기(커버 설정, 아이콘 지정, 투자 원칙 콜아웃 박스 생성)가 완료되었습니다!"
-        else:
-            return "커버 이미지 및 아이콘이 갱신되었습니다. (소개글과 투자 원칙 박스는 이미 존재하여 유지만 되었습니다)"
-
+            requests.patch(blocks_url, headers=HEADERS, json=tips_payload, timeout=10)
+            
+        return "노션 페이지 디자인 꾸미기가 완료되었습니다!"
     except Exception as e:
         return f"노션 디자인 꾸미기 중 오류 발생: {e}"
 
