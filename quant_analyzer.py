@@ -1573,11 +1573,7 @@ if __name__ == "__main__":
                         stock_valuation = (current_us_value_usd * usd_krw) + current_kr_value_krw
                         total_assets = total_cash_val + stock_valuation
                         
-                        threading.Thread(
-                            target=sync_holdings_to_notion, 
-                            args=(holdings_list, total_assets, (total_cash_val, cash_balance_krw, cash_balance_usd), stock_valuation, usd_krw),
-                            daemon=False
-                        ).start()
+                        sync_holdings_to_notion(holdings_list, total_assets, (total_cash_val, cash_balance_krw, cash_balance_usd), stock_valuation, usd_krw)
                     except Exception as ex_holdings:
                         print(f"[Notion Holdings Sync Error] {ex_holdings}")
                     
@@ -1620,7 +1616,7 @@ if __name__ == "__main__":
                                 })
                                 
                     if recommend_list:
-                        threading.Thread(target=sync_recommended_portfolio_to_notion, args=(recommend_list,), daemon=False).start()
+                        sync_recommended_portfolio_to_notion(recommend_list)
                         
                     # 2. 국장/미장 종목 랭킹 작성 및 동기화 (Top 20씩)
                     rankings_list = []
@@ -1707,7 +1703,7 @@ if __name__ == "__main__":
                                 })
                             
                     if rankings_list:
-                        threading.Thread(target=sync_rankings_to_notion, args=(rankings_list,), daemon=False).start()
+                        sync_rankings_to_notion(rankings_list)
                         
                     # 3. 포트폴리오 비중 배분 원형 차트 (Pie Chart) 이미지 로컬 저장
                     try:
