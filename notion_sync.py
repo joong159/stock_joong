@@ -109,6 +109,40 @@ def translate_headline_to_korean(headline, fast=False):
         
     return headline
 
+def get_single_news_sentiment(title_en, title_ko):
+    """
+    VADER 감성 분석기 및 한국어 키워드 기반 매칭을 활용하여 개별 뉴스의 호재/악재 여부를 판별합니다.
+    """
+    try:
+        from nltk.sentiment.vader import SentimentIntensityAnalyzer
+        import nltk
+        try:
+            nltk.data.find('sentiment/vader_lexicon')
+        except LookupError:
+            nltk.download('vader_lexicon', quiet=True)
+        sia = SentimentIntensityAnalyzer()
+        score = sia.polarity_scores(title_en)['compound']
+        if score > 0.05:
+            return "호재 🟢", score
+        elif score < -0.05:
+            return "악재 🔴", score
+    except Exception:
+        pass
+
+    # 한국어 키워드 매칭
+    pos_words = ["상승", "호조", "급등", "어닝서프라이즈", "성장", "호재", "흑자", "최대", "돌파", "계약", "유치", "강세", "긍정", "목표가 상향", "성공"]
+    neg_words = ["하락", "급락", "어닝쇼크", "부진", "감소", "악재", "적자", "붕괴", "취소", "약세", "부정", "목표가 하향", "소송", "규제", "과징금", "실패", "우려"]
+    
+    pos_count = sum(1 for w in pos_words if w in title_ko)
+    neg_count = sum(1 for w in neg_words if w in title_ko)
+    
+    if pos_count > neg_count:
+        return "호재 🟢", 0.5
+    elif neg_count > pos_count:
+        return "악재 🔴", -0.5
+        
+    return "중립 ⚪", 0.0
+
 def get_korean_company_name(symbol):
     # Mapping for common tickers to clean Korean names
     korean_names = {
@@ -417,7 +451,7 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
         return
         
     try:
-        # 데이터베이스 스키마 보완 (Market 칼럼 추가)
+        # 데이터베이스 스키마 보완 (Market 및 Sentiment 칼럼 추가)
         try:
             update_db_url = f"https://api.notion.com/v1/databases/{db_id}"
             schema_payload = {
@@ -427,6 +461,15 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
                             "options": [
                                 {"name": "KRX", "color": "green"},
                                 {"name": "S&P500", "color": "blue"}
+                            ]
+                        }
+                    },
+                    "Sentiment": {
+                        "select": {
+                            "options": [
+                                {"name": "호재 🟢", "color": "green"},
+                                {"name": "중립 ⚪", "color": "gray"},
+                                {"name": "악재 🔴", "color": "red"}
                             ]
                         }
                     }
@@ -506,6 +549,9 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
             company_name = get_korean_company_name(sym)
             stock_display = f"{company_name} ({sym})" if company_name != sym else sym
             
+            # 개별 뉴스 호재/악재 감성 분석 판별
+            sentiment_val, _ = get_single_news_sentiment(raw_title, korean_title)
+            
             payload = {
                 "parent": {"database_id": db_id},
                 "properties": {
@@ -514,7 +560,8 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
                     "Publisher": {"rich_text": [{"text": {"content": art.get("publisher", "")}}]},
                     "Link": {"url": link},
                     "Date": {"date": {"start": date_str}},
-                    "Market": {"select": {"name": market_val}}
+                    "Market": {"select": {"name": market_val}},
+                    "Sentiment": {"select": {"name": sentiment_val}}
                 }
             }
             res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)

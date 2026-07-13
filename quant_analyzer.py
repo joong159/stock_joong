@@ -1055,6 +1055,7 @@ if __name__ == "__main__":
                 
                 # 리밸런싱 조정 테이블 계산
                 rebal_data = []
+                df_rebal = pd.DataFrame()
                 
                 # WINTER 국면 여부 확인 (미국/한국 각각 독립적으로 판단)
                 is_us_winter = False
@@ -1324,230 +1325,8 @@ if __name__ == "__main__":
                     print(print_df.to_string())
                     print("="*60 + "\n")
                     
-                    # 💡 퀀트 추천 포트폴리오 및 실시간 보유 잔고 노션 동기화
-                    try:
-                        import threading
-                        from notion_sync import sync_recommended_portfolio_to_notion, sync_rankings_to_notion, sync_holdings_to_notion
-                        
-                        # 0. 실시간 보유 잔고 현황 동기화
-                        try:
-                            holdings_list = []
-                            for item in toss_holdings:
-                                sym = item.get("symbol")
-                                qty = float(item.get("quantity", 0.0))
-                                price = float(item.get("lastPrice", 0.0))
-                                currency = item.get("currency", "KRW")
-                                
-                                name = sym
-                                for t in alpha_results.index:
-                                    if get_toss_symbol(t) == sym:
-                                        name = alpha_results.at[t, 'Name'] if 'Name' in alpha_results.columns else t
-                                        break
-                                        
-                                avg_buy_price = float(item.get("averagePurchasePrice", 0.0))
-                                pl_dict = item.get("profitLoss", {})
-                                if pl_dict:
-                                    pl_rate = float(pl_dict.get("rate", 0.0)) * 100.0
-                                else:
-                                    if avg_buy_price > 0.0:
-                                        pl_rate = ((price - avg_buy_price) / avg_buy_price) * 100.0
-                                    else:
-                                        pl_rate = 0.0
-                                        
-                                avg_buy_price_krw = avg_buy_price * usd_krw if currency == "USD" else avg_buy_price
-                                purchase_val_krw = qty * avg_buy_price_krw
-                                if purchase_val_krw <= 0.0:
-                                    price_krw = price * usd_krw if currency == "USD" else price
-                                    purchase_val_krw = qty * price_krw
-                                    
-                                price_krw = price * usd_krw if currency == "USD" else price
-                                val_krw = qty * price_krw
-                                
-                                holdings_list.append((sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency))
-                                
-                            total_cash_val = cash_balance_krw + (cash_balance_usd * usd_krw)
-                            stock_valuation = (current_us_value_usd * usd_krw) + current_kr_value_krw
-                            total_assets = total_cash_val + stock_valuation
-                            
-                            threading.Thread(
-                                target=sync_holdings_to_notion, 
-                                args=(holdings_list, total_assets, (total_cash_val, cash_balance_krw, cash_balance_usd), stock_valuation, usd_krw),
-                                daemon=False
-                            ).start()
-                        except Exception as ex_holdings:
-                            print(f"[Notion Holdings Sync Error] {ex_holdings}")
-                        
-                        # 1. 추천 포트폴리오 (액션 포함)
-                        recommend_list = []
-                        for ticker, row in final_portfolio.iterrows():
-                            t_sym = get_toss_symbol(ticker)
-                            # rebal_data에서 이 종목의 액션 찾기
-                            action = "HOLD"
-                            for rebal in rebal_data:
-                                if rebal["Toss_Symbol"] == t_sym:
-                                    if rebal["Action"] in ["BUY", "SELL", "KEEP"]:
-                                        action = "HOLD" if rebal["Action"] == "KEEP" else rebal["Action"]
-                                    break
-                                    
-                            recommend_list.append({
-                                "symbol": str(ticker),
-                                "name": str(row.get("Name", "")),
-                                "market": str(row.get("Market", "")),
-                                "industry": str(row.get("Industry", "")),
-                                "score": float(row.get("AI_News_Score", 0.0)),
-                                "weight": float(row.get("Weight(%)", 0.0)),
-                                "amount": float(row.get("Invest_Amount(KRW)", 0.0)),
-                                "action": action
-                            })
-                            
-                        # 청산 대상 주식 (SELL) - 포트폴리오에는 없지만 rebal_data에서 SELL인 종목들 추가
-                        for rebal in rebal_data:
-                            if rebal["Action"] == "SELL":
-                                exists = any(item["symbol"] == rebal["Ticker"] or item["symbol"] == rebal["Toss_Symbol"] for item in recommend_list)
-                                if not exists:
-                                    recommend_list.append({
-                                        "symbol": rebal["Toss_Symbol"],
-                                        "name": rebal["Name"],
-                                        "market": "KRX" if (rebal["Toss_Symbol"].isdigit() or rebal["Ticker"].endswith('.KS') or rebal["Ticker"].endswith('.KQ')) else "SP500",
-                                        "industry": "청산 대상",
-                                        "score": 0.0,
-                                        "weight": 0.0,
-                                        "amount": 0.0,
-                                        "action": "SELL"
-                                    })
-                                    
-                        if recommend_list:
-                            threading.Thread(target=sync_recommended_portfolio_to_notion, args=(recommend_list,), daemon=False).start()
-                            
-                        # 2. 국장/미장 종목 랭킹 작성 및 동기화 (Top 20씩)
-                        rankings_list = []
-                        
-                        # S&P500 랭킹 (alpha_results_us 사용)
-                        if ('alpha_results_us' in globals() or 'alpha_results_us' in locals()) and not alpha_results_us.empty:
-                            sp500_sorted = alpha_results_us.sort_values(by="Pure_Alpha(%)", ascending=False)
-                            for idx, (ticker, row) in enumerate(sp500_sorted.head(20).iterrows()):
-                                rankings_list.append({
-                                    "name": str(row.get("Name", ticker)),
-                                    "symbol": str(ticker),
-                                    "market": "S&P500",
-                                    "rank": idx + 1,
-                                    "score": float(row.get("Pure_Alpha(%)", 0.0)),
-                                    "industry": str(row.get("Industry", ""))
-                                })
-                            # 테스트 모드인 경우 20개 채워지도록 가상 데이터 패딩
-                            if args_cli.test and len(sp500_sorted) < 20:
-                                dummy_us = [
-                                    ("MSFT", "Microsoft Corp", "Technology", 4.5),
-                                    ("GOOGL", "Alphabet Inc", "Technology", 4.2),
-                                    ("AMZN", "Amazon.com Inc", "Consumer Discretionary", 3.9),
-                                    ("NVDA", "NVIDIA Corp", "Technology", 3.8),
-                                    ("META", "Meta Platforms Inc", "Technology", 3.5),
-                                    ("TSLA", "Tesla Inc", "Consumer Discretionary", 3.1),
-                                    ("BRK.B", "Berkshire Hathaway", "Financials", 2.9),
-                                    ("LLY", "Eli Lilly & Co", "Healthcare", 2.7),
-                                    ("AVGO", "Broadcom Inc", "Technology", 2.5),
-                                    ("V", "Visa Inc", "Financials", 2.3),
-                                    ("JNJ", "Johnson & Johnson", "Healthcare", 2.1),
-                                    ("PG", "Procter & Gamble", "Consumer Staples", 1.9)
-                                ]
-                                current_len = len(sp500_sorted)
-                                for idx, (sym, name, ind, score) in enumerate(dummy_us):
-                                    if current_len + idx >= 20:
-                                        break
-                                    rankings_list.append({
-                                        "name": name,
-                                        "symbol": sym,
-                                        "market": "S&P500",
-                                        "rank": current_len + idx + 1,
-                                        "score": score,
-                                        "industry": ind
-                                    })
-                                
-                        # KRX 랭킹 (alpha_results_kr 사용)
-                        if ('alpha_results_kr' in globals() or 'alpha_results_kr' in locals()) and not alpha_results_kr.empty:
-                            krx_sorted = alpha_results_kr.sort_values(by="Pure_Alpha(%)", ascending=False)
-                            for idx, (ticker, row) in enumerate(krx_sorted.head(20).iterrows()):
-                                rankings_list.append({
-                                    "name": str(row.get("Name", ticker)),
-                                    "symbol": str(ticker),
-                                    "market": "KRX",
-                                    "rank": idx + 1,
-                                    "score": float(row.get("Pure_Alpha(%)", 0.0)),
-                                    "industry": str(row.get("Industry", ""))
-                                })
-                            # 테스트 모드인 경우 20개 채워지도록 가상 데이터 패딩
-                            if args_cli.test and len(krx_sorted) < 20:
-                                dummy_kr = [
-                                    ("005930", "삼성전자", "반도체", 5.2),
-                                    ("000660", "SK하이닉스", "반도체", 4.9),
-                                    ("373220", "LG에너지솔루션", "이차전지", 4.5),
-                                    ("207940", "삼성바이오로직스", "제약바이오", 4.2),
-                                    ("005380", "현대차", "자동차", 3.8),
-                                    ("000270", "기아", "자동차", 3.6),
-                                    ("068270", "셀트리온", "제약바이오", 3.4),
-                                    ("005490", "POSCO홀딩스", "철강", 3.1),
-                                    ("035420", "NAVER", "IT플랫폼", 2.9),
-                                    ("035720", "카카오", "IT플랫폼", 2.7),
-                                    ("051910", "LG화학", "화학", 2.5),
-                                    ("006400", "삼성SDI", "이차전지", 2.3),
-                                    ("012330", "현대모비스", "자동차부품", 2.1),
-                                    ("003550", "LG", "지주회사", 1.9),
-                                    ("034730", "SK", "지주회사", 1.8),
-                                    ("017670", "SK텔레콤", "통신", 1.7),
-                                    ("015760", "한국전력", "유틸리티", 1.6)
-                                ]
-                                current_len = len(krx_sorted)
-                                for idx, (sym, name, ind, score) in enumerate(dummy_kr):
-                                    if current_len + idx >= 20:
-                                        break
-                                    rankings_list.append({
-                                        "name": name,
-                                        "symbol": sym,
-                                        "market": "KRX",
-                                        "rank": current_len + idx + 1,
-                                        "score": score,
-                                        "industry": ind
-                                    })
-                                
-                        if rankings_list:
-                            threading.Thread(target=sync_rankings_to_notion, args=(rankings_list,), daemon=False).start()
-                            
-                        # 3. 포트폴리오 비중 배분 원형 차트 (Pie Chart) 이미지 로컬 저장
-                        try:
-                            import matplotlib
-                            matplotlib.use('Agg')
-                            import matplotlib.pyplot as plt
-                            
-                            # 한글 폰트 설정 (Windows 기본 맑은 고딕 사용)
-                            plt.rcParams['font.family'] = 'Malgun Gothic'
-                            plt.rcParams['axes.unicode_minus'] = False
-                            
-                            labels = []
-                            sizes = []
-                            for item in recommend_list:
-                                if item["weight"] > 0:
-                                    labels.append(f"{item['name']}\n({item['weight']:.1f}%)")
-                                    sizes.append(item["weight"])
-                                    
-                            if sizes:
-                                fig, ax = plt.subplots(figsize=(8, 8))
-                                # 모던하고 예쁜 파스텔 톤 색상 구성
-                                colors = ['#ff9999','#66b3ff','#99ff99','#ffcc99','#c2c2f0','#ffb3e6', '#c4e17f', '#76d7c4', '#f7dc6f', '#af7ac5']
-                                wedges, texts, autotexts = ax.pie(sizes, labels=labels, autopct='%1.1f%%',
-                                                                  startangle=90, colors=colors[:len(sizes)],
-                                                                  wedgeprops=dict(width=0.4, edgecolor='w'))
-                                plt.setp(texts, size=10)
-                                plt.setp(autotexts, size=9, weight="bold")
-                                ax.set_title("퀀트 추천 포트폴리오 비중 배분율 (50/50 Dual)", fontsize=14, weight="bold")
-                                plt.tight_layout()
-                                plt.savefig("quant_portfolio_allocation.png", dpi=150)
-                                plt.close()
-                                log_success("📊 추천 포트폴리오 자산 배분율 원형 차트 이미지가 'quant_portfolio_allocation.png' 파일로 로컬 저장되었습니다.")
-                        except Exception as pie_ex:
-                            print(f"[Pie Chart Generation Warning] {pie_ex}")
-                            
-                    except Exception as ex:
-                        print(f"[Notion Recommend/Ranking Sync Error] {ex}")
+                    # (Notion sync moved outside of the if-block to run unconditionally)
+                    pass
                     
                     # 실제 TOSS 주문 실행
                     if args_cli.execute:
@@ -1747,6 +1526,223 @@ if __name__ == "__main__":
                 if not output_filename:
                     output_filename = 'stock_analysis_results.xlsx'
                     log_warn(f"저장 위치가 선택되지 않아 기본 경로 및 파일명으로 지정합니다: {output_filename}")
+                
+
+                # 💡 퀀트 추천 포트폴리오 및 실시간 보유 잔고 노션 동기화
+                try:
+                    import threading
+                    from notion_sync import sync_recommended_portfolio_to_notion, sync_rankings_to_notion, sync_holdings_to_notion
+                    
+                    # 0. 실시간 보유 잔고 현황 동기화
+                    try:
+                        holdings_list = []
+                        for item in toss_holdings:
+                            sym = item.get("symbol")
+                            qty = float(item.get("quantity", 0.0))
+                            price = float(item.get("lastPrice", 0.0))
+                            currency = item.get("currency", "KRW")
+                            
+                            name = sym
+                            for t in alpha_results.index:
+                                if get_toss_symbol(t) == sym:
+                                    name = alpha_results.at[t, 'Name'] if 'Name' in alpha_results.columns else t
+                                    break
+                                    
+                            avg_buy_price = float(item.get("averagePurchasePrice", 0.0))
+                            pl_dict = item.get("profitLoss", {})
+                            if pl_dict:
+                                pl_rate = float(pl_dict.get("rate", 0.0)) * 100.0
+                            else:
+                                if avg_buy_price > 0.0:
+                                    pl_rate = ((price - avg_buy_price) / avg_buy_price) * 100.0
+                                else:
+                                    pl_rate = 0.0
+                                    
+                            avg_buy_price_krw = avg_buy_price * usd_krw if currency == "USD" else avg_buy_price
+                            purchase_val_krw = qty * avg_buy_price_krw
+                            if purchase_val_krw <= 0.0:
+                                price_krw = price * usd_krw if currency == "USD" else price
+                                purchase_val_krw = qty * price_krw
+                                
+                            price_krw = price * usd_krw if currency == "USD" else price
+                            val_krw = qty * price_krw
+                            
+                            holdings_list.append((sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency))
+                            
+                        total_cash_val = cash_balance_krw + (cash_balance_usd * usd_krw)
+                        stock_valuation = (current_us_value_usd * usd_krw) + current_kr_value_krw
+                        total_assets = total_cash_val + stock_valuation
+                        
+                        threading.Thread(
+                            target=sync_holdings_to_notion, 
+                            args=(holdings_list, total_assets, (total_cash_val, cash_balance_krw, cash_balance_usd), stock_valuation, usd_krw),
+                            daemon=False
+                        ).start()
+                    except Exception as ex_holdings:
+                        print(f"[Notion Holdings Sync Error] {ex_holdings}")
+                    
+                    # 1. 추천 포트폴리오 (액션 포함)
+                    recommend_list = []
+                    for ticker, row in final_portfolio.iterrows():
+                        t_sym = get_toss_symbol(ticker)
+                        action = "HOLD"
+                        for rebal in rebal_data:
+                            if rebal["Toss_Symbol"] == t_sym:
+                                if rebal["Action"] in ["BUY", "SELL", "KEEP"]:
+                                    action = "HOLD" if rebal["Action"] == "KEEP" else rebal["Action"]
+                                break
+                                
+                        recommend_list.append({
+                            "symbol": str(ticker),
+                            "name": str(row.get("Name", "")),
+                            "market": str(row.get("Market", "")),
+                            "industry": str(row.get("Industry", "")),
+                            "score": float(row.get("AI_News_Score", 0.0)),
+                            "weight": float(row.get("Weight(%)", 0.0)),
+                            "amount": float(row.get("Invest_Amount(KRW)", 0.0)),
+                            "action": action
+                        })
+                        
+                    # 청산 대상 주식 (SELL) - 포트폴리오에는 없지만 rebal_data에서 SELL인 종목들 추가
+                    for rebal in rebal_data:
+                        if rebal["Action"] == "SELL":
+                            exists = any(item["symbol"] == rebal["Ticker"] or item["symbol"] == rebal["Toss_Symbol"] for item in recommend_list)
+                            if not exists:
+                                recommend_list.append({
+                                    "symbol": rebal["Toss_Symbol"],
+                                    "name": rebal["Name"],
+                                    "market": "KRX" if (rebal["Toss_Symbol"].isdigit() or rebal["Ticker"].endswith('.KS') or rebal["Ticker"].endswith('.KQ')) else "SP500",
+                                    "industry": "청산 대상",
+                                    "score": 0.0,
+                                    "weight": 0.0,
+                                    "amount": 0.0,
+                                    "action": "SELL"
+                                })
+                                
+                    if recommend_list:
+                        threading.Thread(target=sync_recommended_portfolio_to_notion, args=(recommend_list,), daemon=False).start()
+                        
+                    # 2. 국장/미장 종목 랭킹 작성 및 동기화 (Top 20씩)
+                    rankings_list = []
+                    
+                    if ('alpha_results_us' in globals() or 'alpha_results_us' in locals()) and not alpha_results_us.empty:
+                        sp500_sorted = alpha_results_us.sort_values(by="Pure_Alpha(%)", ascending=False)
+                        for idx, (ticker, row) in enumerate(sp500_sorted.head(20).iterrows()):
+                            rankings_list.append({
+                                "name": str(row.get("Name", ticker)),
+                                "symbol": str(ticker),
+                                "market": "S&P500",
+                                "rank": idx + 1,
+                                "score": float(row.get("Pure_Alpha(%)", 0.0)),
+                                "industry": str(row.get("Industry", ""))
+                            })
+                        if args_cli.test and len(sp500_sorted) < 20:
+                            dummy_us = [
+                                ("MSFT", "Microsoft Corp", "Technology", 4.5),
+                                ("GOOGL", "Alphabet Inc", "Technology", 4.2),
+                                ("AMZN", "Amazon.com Inc", "Consumer Discretionary", 3.9),
+                                ("NVDA", "NVIDIA Corp", "Technology", 3.8),
+                                ("META", "Meta Platforms Inc", "Technology", 3.5),
+                                ("TSLA", "Tesla Inc", "Consumer Discretionary", 3.1),
+                                ("BRK.B", "Berkshire Hathaway", "Financials", 2.9),
+                                ("LLY", "Eli Lilly & Co", "Healthcare", 2.7),
+                                ("AVGO", "Broadcom Inc", "Technology", 2.5),
+                                ("V", "Visa Inc", "Financials", 2.3),
+                                ("JNJ", "Johnson & Johnson", "Healthcare", 2.1),
+                                ("PG", "Procter & Gamble", "Consumer Staples", 1.9)
+                            ]
+                            current_len = len(sp500_sorted)
+                            for idx, (sym, name, ind, score) in enumerate(dummy_us):
+                                if current_len + idx >= 20:
+                                    break
+                                rankings_list.append({
+                                    "name": name,
+                                    "symbol": sym,
+                                    "market": "S&P500",
+                                    "rank": current_len + idx + 1,
+                                    "score": score,
+                                    "industry": ind
+                                })
+                            
+                    if ('alpha_results_kr' in globals() or 'alpha_results_kr' in locals()) and not alpha_results_kr.empty:
+                        krx_sorted = alpha_results_kr.sort_values(by="Pure_Alpha(%)", ascending=False)
+                        for idx, (ticker, row) in enumerate(krx_sorted.head(20).iterrows()):
+                            rankings_list.append({
+                                "name": str(row.get("Name", ticker)),
+                                "symbol": str(ticker),
+                                "market": "KRX",
+                                "rank": idx + 1,
+                                "score": float(row.get("Pure_Alpha(%)", 0.0)),
+                                "industry": str(row.get("Industry", ""))
+                            })
+                        if args_cli.test and len(krx_sorted) < 20:
+                            dummy_kr = [
+                                ("005930", "삼성전자", "반도체", 4.5),
+                                ("000660", "SK하이닉스", "반도체", 4.2),
+                                ("005380", "현대자동차", "자동차", 3.9),
+                                ("000270", "기아", "자동차", 3.8),
+                                ("035420", "NAVER", "IT서비스", 3.5),
+                                ("068270", "셀트리온", "바이오헬스", 3.1),
+                                ("005490", "POSCO홀딩스", "철강", 2.9),
+                                ("035720", "카카오", "IT플랫폼", 2.7),
+                                ("051910", "LG화학", "화학", 2.5),
+                                ("006400", "삼성SDI", "이차전지", 2.3),
+                                ("012330", "현대모비스", "자동차부품", 2.1),
+                                ("003550", "LG", "지주회사", 1.9),
+                                ("034730", "SK", "지주회사", 1.8),
+                                ("017670", "SK텔레콤", "통신", 1.7),
+                                ("015760", "한국전력", "유틸리티", 1.6)
+                            ]
+                            current_len = len(krx_sorted)
+                            for idx, (sym, name, ind, score) in enumerate(dummy_kr):
+                                if current_len + idx >= 20:
+                                    break
+                                rankings_list.append({
+                                    "name": name,
+                                    "symbol": sym,
+                                    "market": "KRX",
+                                    "rank": current_len + idx + 1,
+                                    "score": score,
+                                    "industry": ind
+                                })
+                            
+                    if rankings_list:
+                        threading.Thread(target=sync_rankings_to_notion, args=(rankings_list,), daemon=False).start()
+                        
+                    # 3. 포트폴리오 비중 배분 원형 차트 (Pie Chart) 이미지 로컬 저장
+                    try:
+                        import matplotlib
+                        matplotlib.use('Agg')
+                        import matplotlib.pyplot as plt
+                        
+                        plt.rcParams['font.family'] = 'Malgun Gothic'
+                        plt.rcParams['axes.unicode_minus'] = False
+                        
+                        labels = []
+                        sizes = []
+                        for item in recommend_list:
+                            if item["weight"] > 0:
+                                labels.append(f"{item['name']}\n({item['weight']:.1f}%)")
+                                sizes.append(item["weight"])
+                                
+                        if sizes:
+                            fig, ax = plt.subplots(figsize=(8, 8))
+                            colors = ['#ff9999','#66b3ff','#99ff99','#ffcc99','#c2c2f0','#ffb3e6', '#c4e17f', '#76d7c4', '#f7dc6f', '#af7ac5']
+                            wedges, texts, autotexts = ax.pie(sizes, labels=labels, autopct='%1.1f%%',
+                                                              startangle=90, colors=colors[:len(sizes)],
+                                                              wedgeprops=dict(width=0.4, edgecolor='w'))
+                            plt.setp(texts, size=10)
+                            plt.setp(autotexts, size=9, weight="bold")
+                            ax.set_title("퀀트 추천 포트폴리오 비중 배분율 (50/50 Dual)", fontsize=14, weight="bold")
+                            plt.tight_layout()
+                            plt.savefig("quant_portfolio_allocation.png", dpi=150)
+                            plt.close()
+                            log_success("📊 추천 포트폴리오 자산 배분율 원형 차트 이미지가 'quant_portfolio_allocation.png' 파일로 로컬 저장되었습니다.")
+                    except Exception as pie_ex:
+                        print(f"[Pie Chart Generation Warning] {pie_ex}")
+                        
+                except Exception as ex:
+                    print(f"[Notion Recommend/Ranking Sync Error] {ex}")
                 
                 # 알파 지표 설명을 담은 데이터프레임 생성
                 alpha_descriptions = [
