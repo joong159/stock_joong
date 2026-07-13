@@ -2,8 +2,8 @@ name: Auto Quant Rebalancing & News Sync
 
 on:
   schedule:
-    # 30분마다 실행 (UTC 기준)
-    - cron: '*/30 * * * *'
+    # 매 시간 14분, 44분에 실행 (30분 간격, 00/30분 혼잡 피하기)
+    - cron: '14,44 * * * *'
   workflow_dispatch: # 수동 실행 버튼 제공
 
 permissions:
