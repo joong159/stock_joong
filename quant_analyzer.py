@@ -743,6 +743,30 @@ def export_to_excel(output_filename, df_portfolio, df_alpha, df_market, df_dict,
     except Exception as e:
         log_error(f"엑셀 저장 중 오류가 발생했습니다: {e}")
 
+
+def get_safe_close_price(ticker_df):
+    """
+    yfinance 데이터프레임에서 종가(Close)를 판다스 버전 경고 없이 안전하게 추출합니다.
+    """
+    if ticker_df.empty:
+        return 0.0
+    
+    # Close 컬럼 추출
+    close_col = ticker_df.get('Close')
+    if close_col is None:
+        close_col = ticker_df.iloc[:, -1] # 없으면 마지막 컬럼 사용
+        
+    if isinstance(close_col, pd.DataFrame):
+        val = close_col.iloc[-1, 0]
+    elif isinstance(close_col, pd.Series):
+        val = close_col.iloc[-1]
+    else:
+        val = close_col
+        
+    if isinstance(val, pd.Series):
+        return float(val.iloc[0])
+    return float(val)
+
 def get_toss_symbol(target_ticker):
     """
     yfinance 티커 코드를 토스증권 API 종목 심볼 규격으로 변환합니다.
@@ -1019,7 +1043,7 @@ if __name__ == "__main__":
                         try:
                             ticker_df = yf.download(ticker_name, period='1d', progress=False)
                             if not ticker_df.empty:
-                                price_original = float(ticker_df['Close'].iloc[-1])
+                                price_original = get_safe_close_price(ticker_df)
                         except Exception:
                             pass
                         
@@ -1243,7 +1267,7 @@ if __name__ == "__main__":
                             try:
                                 ticker_df = yf.download(ticker, period='1d', progress=False)
                                 if not ticker_df.empty:
-                                    price_original = float(ticker_df['Close'].iloc[-1])
+                                    price_original = get_safe_close_price(ticker_df)
                                     price_krw = price_original * usd_krw
                             except Exception:
                                 pass
@@ -1288,7 +1312,7 @@ if __name__ == "__main__":
                             try:
                                 ticker_df = yf.download(ticker, period='1d', progress=False)
                                 if not ticker_df.empty:
-                                    price_original = float(ticker_df['Close'].iloc[-1])
+                                    price_original = get_safe_close_price(ticker_df)
                                     price_krw = price_original
                             except Exception:
                                 pass
