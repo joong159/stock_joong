@@ -1019,17 +1019,20 @@ if __name__ == "__main__":
                 # --- 리밸런싱 주문 수량 계산 및 TOSS API 연동 (느슨한 로테이션 + 샹들리에 에그짓) ---
                 df_rebal = pd.DataFrame()
                 toss_holdings = []
+                holdings_loaded_successfully = False
 
                 if toss_client:
                     log_info("토스증권 계좌의 현재 보유 주식 잔고를 불러옵니다...")
                     try:
                         toss_holdings = toss_client.get_holdings()
                         log_success(f"보유 잔고 조회 완료! (보유 종목 수: {len(toss_holdings)}개)")
+                        holdings_loaded_successfully = True
                     except Exception as e:
                         log_error(f"보유 잔고를 불러오지 못했습니다: {e}")
-                else:
-                    # 시뮬레이터 모드: 로컬 파일에서 가상 보유 주식 정보 불러오기
-                    log_info("시뮬레이터 모드: 로컬 포트폴리오 상태에서 가상 보유 종목 정보를 불러옵니다...")
+                        
+                if not holdings_loaded_successfully:
+                    # 시뮬레이터 모드 혹은 API 실패 시: 로컬 파일/Supabase에서 가상 보유 주식 정보 불러오기
+                    log_info("TOSS API 비활성 혹은 호출 실패로 인해 포트폴리오 상태(Supabase/로컬)에서 가상 보유 종목 정보를 불러옵니다...")
                     state = load_portfolio_state()
                     toss_holdings = []
                     for sym, info in state.items():
@@ -1052,6 +1055,7 @@ if __name__ == "__main__":
                             "symbol": sym,
                             "quantity": info.get("purchase_qty", 0.0),
                             "lastPrice": price_original,
+                            "averagePurchasePrice": info.get("purchase_price", 0.0),
                             "currency": "USD" if is_us else "KRW"
                         })
                         

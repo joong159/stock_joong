@@ -601,6 +601,9 @@ def ensure_recommend_db_properties(db_id):
                     "format": "percent"
                 }
             },
+            "Date": {
+                "date": {}
+            },
             "Invest Amount (₩)": None  # 기존 투자금액 속성 제거
         }
     }
@@ -661,6 +664,7 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             
             # 수치형 비중 및 액션 매핑
             weight_val = weight / 100.0
+            today_str = datetime.datetime.now().strftime("%Y-%m-%d")
             
             payload = {
                 "parent": {"database_id": db_id},
@@ -675,7 +679,8 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                     "Currency": {"select": {"name": currency}},
                     "Action": {"select": {"name": action}},
                     "Weight (%)": {"number": weight_val},
-                    "보유금 대비 비중 (%)": {"number": weight_val}
+                    "보유금 대비 비중 (%)": {"number": weight_val},
+                    "Date": {"date": {"start": today_str}}
                 }
             }
             requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
