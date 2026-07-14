@@ -73,4 +73,5 @@ jobs:
           if [ -f .portfolio_state.json ]; then git add -f .portfolio_state.json; fi
           if [ -f .market_regime.txt ]; then git add -f .market_regime.txt; fi
           git commit -m "Auto-update portfolio state and market regime [skip ci]" || echo "No changes to commit"
-          git push
+          git pull --rebase origin main
+          git push origin main
