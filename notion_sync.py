@@ -603,12 +603,13 @@ def ensure_recommend_db_properties(db_id):
             },
             "Date": {
                 "date": {}
-            },
-            "Invest Amount (₩)": None  # 기존 투자금액 속성 제거
+            }
         }
     }
     try:
-        requests.patch(url, headers=HEADERS, json=payload, timeout=10)
+        res = requests.patch(url, headers=HEADERS, json=payload, timeout=10)
+        if res.status_code != 200:
+            print(f"[Notion Schema Update Warning] Status: {res.status_code}, Res: {res.text}")
     except Exception as e:
         print(f"[Notion Properties Warning] Failed to update recommended portfolio schema: {e}")
 
@@ -683,7 +684,9 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                     "Date": {"date": {"start": today_str}}
                 }
             }
-            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            if res_create.status_code not in [200, 201]:
+                print(f"[Notion Recommend Warning] Page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
             
         print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다.")
     except Exception as e:
@@ -777,7 +780,9 @@ def sync_rankings_to_notion(rankings_list):
                     "Date": {"date": {"start": today_str}}
                 }
             }
-            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            if res_create.status_code not in [200, 201]:
+                print(f"[Notion Ranking Warning] KR page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
             
         # 3. 미장 신규 랭킹 생성 (오늘 날짜 부여)
         # 순위가 정돈되어 들어가도록 Rank 역순(20위부터 1위)으로 생성
@@ -805,7 +810,9 @@ def sync_rankings_to_notion(rankings_list):
                     "Date": {"date": {"start": today_str}}
                 }
             }
-            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            if res_create.status_code not in [200, 201]:
+                print(f"[Notion Ranking Warning] US page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
             
         print(f"[Notion Ranking] 국장/미장 각각 랭킹 동기화를 완료했습니다.")
     except Exception as e:
