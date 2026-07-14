@@ -1504,27 +1504,34 @@ if __name__ == "__main__":
                             log_success("포트폴리오 리밸런싱 주문 처리가 마무리되었습니다.")
                     else:
                         # 시뮬레이터 모드 가상 주문 업데이트
-                        if not toss_client:
-                            log_info("시뮬레이터 모드: 가상 포트폴리오 로컬 상태(.portfolio_state.json)를 업데이트합니다...")
-                            new_state = {}
-                            for ticker, row in df_rebal.iterrows():
-                                act = row['Action']
-                                sym = row['Toss_Symbol']
-                                if act == "HOLD":
-                                    new_state[sym] = portfolio_state.get(sym, {})
-                                    new_state[sym]["purchase_qty"] = row['Target_Qty']
-                                elif act == "BUY":
-                                    new_state[sym] = {
-                                        "purchase_date": time.strftime('%Y-%m-%d %H:%M:%S'),
-                                        "purchase_price": row['Current_Price'],
-                                        "highest_price": row['Current_Price'],
-                                        "purchase_qty": row['Target_Qty']
-                                    }
-                            save_portfolio_state(new_state)
-                            log_success("가상 포트폴리오 로컬 상태 파일이 갱신되었습니다.")
-                        else:
-                            log_info("참고: 실계좌로 리밸런싱 주문을 접수하려면 '--execute' 인자를 추가하세요.")
-                            log_info("예: python quant_analyzer.py --execute")
+                        log_info("시뮬레이터 모드: 가상 포트폴리오 상태(Supabase/로컬)를 업데이트합니다...")
+                        try:
+                            state = load_portfolio_state()
+                        except Exception:
+                            state = {}
+                        new_state = {}
+                        for ticker, row in df_rebal.iterrows():
+                            act = row['Action']
+                            sym = row['Toss_Symbol']
+                            if act in ["HOLD", "KEEP"]:
+                                old_info = state.get(sym, {})
+                                new_state[sym] = {
+                                    "purchase_date": old_info.get("purchase_date", time.strftime('%Y-%m-%d %H:%M:%S')),
+                                    "purchase_price": old_info.get("purchase_price", row['Current_Price']),
+                                    "highest_price": max(old_info.get("highest_price", row['Current_Price']), row['Current_Price']),
+                                    "purchase_qty": row['Target_Qty']
+                                }
+                            elif act == "BUY":
+                                new_state[sym] = {
+                                    "purchase_date": time.strftime('%Y-%m-%d %H:%M:%S'),
+                                    "purchase_price": row['Current_Price'],
+                                    "highest_price": row['Current_Price'],
+                                    "purchase_qty": row['Target_Qty']
+                                }
+                        save_portfolio_state(new_state)
+                        log_success("가상 포트폴리오 상태 파일(Supabase/로컬)이 성공적으로 갱신되었습니다.")
+                        if toss_client:
+                            log_info("참고: 실계좌로 리밸런싱 주문을 접수하려면 '--execute' 인자를 추가하세요. (예: python quant_analyzer.py --execute)")
                 
                 # 윈도우(GUI) 탐색기를 띄워 저장할 폴더 및 파일명 설정
                 output_filename = args_cli.output
@@ -1607,9 +1614,13 @@ if __name__ == "__main__":
                     
                     # 1. 추천 포트폴리오 (액션 포함)
                     recommend_list = []
+                    # 현재 보유 중인 종목 기호 세트 (quantity > 0)
+                    owned_symbols = {h["symbol"] for h in toss_holdings if float(h.get("quantity", 0.0)) > 0}
+                    
                     for ticker, row in final_portfolio.iterrows():
                         t_sym = get_toss_symbol(ticker)
-                        action = "HOLD"
+                        # 보유 중이면 HOLD, 미보유 중이면 BUY가 기본값
+                        action = "HOLD" if t_sym in owned_symbols else "BUY"
                         for rebal in rebal_data:
                             if rebal["Toss_Symbol"] == t_sym:
                                 if rebal["Action"] in ["BUY", "SELL", "KEEP"]:
