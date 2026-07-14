@@ -630,16 +630,58 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
         # 데이터베이스 속성(스키마) 유효성 보장 및 보강
         ensure_recommend_db_properties(db_id)
         
-        # 1. 기존 노션 추천 포트폴리오 항목 전부 아카이브 (최신 추천 위주 유지를 위함)
+        # 1. 기존 노션 추천 포트폴리오 항목 읽기 및 아카이브 처리
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
         res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+        
+        prev_recommended = {}
         if res.status_code == 200:
             results = res.json().get("results", [])
             for page in results:
                 page_id = page.get("id")
+                props = page.get("properties", {})
+                
+                # Symbol 추출
+                symbol_prop = props.get("Symbol", {}).get("rich_text", [])
+                symbol_txt = "".join([t.get("plain_text", "") for t in symbol_prop]).strip()
+                
+                if not symbol_txt:
+                    requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                    continue
+                
+                # 괄호에서 티커 추출 (예: "삼성전자 (005930.KS)" -> "005930.KS")
+                import re
+                match = re.search(r'\(([^)]+)\)', symbol_txt)
+                ticker = match.group(1).strip() if match else symbol_txt
+                
+                # Name 추출
+                name_prop = props.get("Name", {}).get("title", [])
+                name_txt = "".join([t.get("plain_text", "") for t in name_prop]).strip()
+                
+                # Market 추출
+                market_prop = props.get("Market", {}).get("rich_text", [])
+                market_txt = "".join([t.get("plain_text", "") for t in market_prop]).strip()
+                
+                # Industry 추출
+                industry_prop = props.get("Industry", {}).get("rich_text", [])
+                industry_txt = "".join([t.get("plain_text", "") for t in industry_prop]).strip()
+                
+                # Currency 추출
+                currency_prop = props.get("Currency", {}).get("select", {})
+                currency_txt = currency_prop.get("name", "KRW") if currency_prop else "KRW"
+                
+                prev_recommended[ticker] = {
+                    "name": name_txt,
+                    "symbol_display": symbol_txt,
+                    "market": market_txt,
+                    "industry": industry_txt,
+                    "currency": currency_txt
+                }
+                
+                # 기존 항목 아카이브 처리
                 requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                 
-        # 2. 신규 추천 항목 생성
+        # 2. 신규 추천 항목 생성 (어제 추천 내역 대조를 통한 BUY / HOLD 판정)
         for item in portfolio_list:
             create_url = "https://api.notion.com/v1/pages"
             
@@ -650,20 +692,21 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             score = item.get("score", 0.0)
             weight = item.get("weight", 0.0)
             amount = item.get("amount", 0.0)
-            action = item.get("action", "HOLD")
             
             # 회사 한국어 이름과 코드 통합 표기
             company_name = get_korean_company_name(sym)
             clean_name = company_name if company_name != sym else name
             stock_display = f"{company_name} ({sym})" if company_name != sym else sym
             
+            # 전날 추천 내역과 비교하여 Action 판정
+            # 어제 추천에 이미 있었으면 HOLD, 새로 추천에 편입되었으면 BUY
+            action = "HOLD" if sym in prev_recommended else "BUY"
+            
             currency = "USD" if market == "SP500" else "KRW"
             score_str = f"{score:+.2f}"
             weight_str = f"{weight:.2f}%"
-            # 투자금액 대신 보유금 대비 비중 텍스트 형식으로 노출
             amount_str = f"보유금의 {weight:.2f}%"
             
-            # 수치형 비중 및 액션 매핑
             weight_val = weight / 100.0
             today_str = datetime.datetime.now().strftime("%Y-%m-%d")
             
@@ -687,6 +730,33 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
             if res_create.status_code not in [200, 201]:
                 print(f"[Notion Recommend Warning] Page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
+                
+        # 3. 전날 추천에 있었으나 오늘 탈락한 종목들 (SELL) 생성
+        today_tickers = {item.get("symbol", "") for item in portfolio_list}
+        for prev_sym, prev_info in prev_recommended.items():
+            if prev_sym not in today_tickers:
+                create_url = "https://api.notion.com/v1/pages"
+                today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+                payload = {
+                    "parent": {"database_id": db_id},
+                    "properties": {
+                        "Name": {"title": [{"text": {"content": prev_info["name"]}}]},
+                        "Symbol": {"rich_text": [{"text": {"content": prev_info["symbol_display"]}}]},
+                        "Market": {"rich_text": [{"text": {"content": prev_info["market"]}}]},
+                        "Industry": {"rich_text": [{"text": {"content": prev_info["industry"]}}]},
+                        "NewsScore": {"rich_text": [{"text": {"content": "-"}}]},
+                        "Weight": {"rich_text": [{"text": {"content": "0.00%"}}]},
+                        "InvestAmount": {"rich_text": [{"text": {"content": "보유금의 0.00%"}}]},
+                        "Currency": {"select": {"name": prev_info["currency"]}},
+                        "Action": {"select": {"name": "SELL"}},
+                        "Weight (%)": {"number": 0.0},
+                        "보유금 대비 비중 (%)": {"number": 0.0},
+                        "Date": {"date": {"start": today_str}}
+                    }
+                }
+                res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+                if res_create.status_code not in [200, 201]:
+                    print(f"[Notion Recommend SELL Warning] Page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
             
         print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다.")
     except Exception as e:
