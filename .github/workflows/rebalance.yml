@@ -64,6 +64,7 @@ jobs:
       - name: Run News Sync
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python sync_news_hourly.py
 
       - name: Commit and Push Portfolio State

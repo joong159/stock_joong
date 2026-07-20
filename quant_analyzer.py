@@ -1055,9 +1055,34 @@ if __name__ == "__main__":
                             "symbol": sym,
                             "quantity": info.get("purchase_qty", 0.0),
                             "lastPrice": price_original,
-                            "averagePurchasePrice": info.get("purchase_price", 0.0),
+                            "averagePurchasePrice": info.get("purchase_price", price_original),
                             "currency": "USD" if is_us else "KRW"
                         })
+                        
+                    # 만약 기존 가상 포트폴리오 상태가 텅 비어 있다면 퀀트 상위 추천 10종목으로 자동 초기화
+                    if not toss_holdings:
+                        log_info("가상 보유 상태가 비어 있어 퀀트 랭킹 상위 종목으로 가상 보유 잔고를 초기 구성합니다...")
+                        top_picks_combined = pd.concat([alpha_results_us.head(5), alpha_results_kr.head(5)]) if 'alpha_results_us' in locals() and 'alpha_results_kr' in locals() else alpha_results.head(10)
+                        for t in top_picks_combined.index:
+                            sym = get_toss_symbol(t)
+                            price_orig = 0.0
+                            try:
+                                t_df = yf.download(t, period='1d', progress=False)
+                                if not t_df.empty:
+                                    price_orig = get_safe_close_price(t_df)
+                            except Exception:
+                                pass
+                            is_us = not (t.endswith('.KS') or t.endswith('.KQ'))
+                            budget_krw = 1000000.0
+                            budget_val = (budget_krw / usd_krw) if (is_us and usd_krw > 0) else budget_krw
+                            qty = (budget_val / price_orig) if price_orig > 0 else 1.0
+                            toss_holdings.append({
+                                "symbol": sym,
+                                "quantity": qty,
+                                "lastPrice": price_orig,
+                                "averagePurchasePrice": price_orig,
+                                "currency": "USD" if is_us else "KRW"
+                            })
                         
                 # TOSS 보유 종목 사전(Dict) 매핑
                 holdings_dict = {}

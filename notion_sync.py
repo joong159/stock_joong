@@ -146,7 +146,7 @@ def get_single_news_sentiment(title_en, title_ko):
 def get_korean_company_name(symbol):
     # Mapping for common tickers to clean Korean names
     korean_names = {
-        # KRX
+        # KRX Top Tickers
         '005930.KS': '삼성전자', '005930': '삼성전자',
         '000660.KS': 'SK하이닉스', '000660': 'SK하이닉스',
         '005380.KS': '현대차', '005380': '현대차',
@@ -157,7 +157,36 @@ def get_korean_company_name(symbol):
         '005490.KS': 'POSCO홀딩스', '005490': 'POSCO홀딩스',
         '207940.KS': '삼성바이오로직스', '207940': '삼성바이오로직스',
         '051910.KS': 'LG화학', '051910': 'LG화학',
-        # US
+        '105560.KS': 'KB금융', '105560': 'KB금융',
+        '055550.KS': '신한지주', '055550': '신한지주',
+        '011200.KS': 'HMM', '011200': 'HMM',
+        '033780.KS': 'KT&G', '033780': 'KT&G',
+        '373220.KS': 'LG에너지솔루션', '373220': 'LG에너지솔루션',
+        '006400.KS': '삼성SDI', '006400': '삼성SDI',
+        '028260.KS': '삼성물산', '028260': '삼성물산',
+        '012330.KS': '현대모비스', '012330': '현대모비스',
+        '066570.KS': 'LG전자', '066570': 'LG전자',
+        '032830.KS': '삼성생명', '032830': '삼성생명',
+        '003670.KS': '포스코퓨처엠', '003670': '포스코퓨처엠',
+        '000810.KS': '삼성화재', '000810': '삼성화재',
+        '015760.KS': '한국전력', '015760': '한국전력',
+        '086790.KS': '하나금융지주', '086790': '하나금융지주',
+        '017670.KS': 'SK텔레콤', '017670': 'SK텔레콤',
+        '010140.KS': '삼성중공업', '010140': '삼성중공업',
+        '009150.KS': '삼성전기', '009150': '삼성전기',
+        '034730.KS': 'SK', '034730': 'SK',
+        '329180.KS': 'HD현대중공업', '329180': 'HD현대중공업',
+        '003550.KS': 'LG', '003550': 'LG',
+        '036570.KS': '엔씨소프트', '036570': '엔씨소프트',
+        '018260.KS': '삼성SDS', '018260': '삼성SDS',
+        '024110.KS': '기업은행', '024110': '기업은행',
+        '030200.KS': 'KT', '030200': 'KT',
+        '010950.KS': 'S-Oil', '010950': 'S-Oil',
+        '034020.KS': '두산에너빌리티', '034020': '두산에너빌리티',
+        '000150.KS': '두산', '000150': '두산',
+        '096770.KS': 'SK이노베이션', '096770': 'SK이노베이션',
+        
+        # US Popular Tickers
         'AAPL': '애플', 'MSFT': '마이크로소프트', 'GOOGL': '알파벳(구글)', 'GOOG': '알파벳(구글)',
         'AMZN': '아마존', 'NVDA': '엔비디아', 'TSLA': '테슬라', 'META': '메타(페이스북)',
         'BRK.B': '버크셔해서웨이', 'BRK-B': '버크셔해서웨이', 'BRK-A': '버크셔해서웨이',
@@ -170,14 +199,17 @@ def get_korean_company_name(symbol):
         'CRM': '세일즈포스', 'NKE': '나이키', 'MCD': '맥도날드', 'TXN': '텍사스인스트루먼트',
         'QCOM': '퀄컴', 'HON': '하니웰', 'GE': '제너럴일렉트릭', 'XOM': '엑슨모빌',
         'CVX': '쉐브론', 'WFC': '웰스파고', 'SNDK': '샌디스크', 'PANW': '팔로알토네트웍스',
-        'VLO': '발레로에너지', 'MTD': '메틀러토레도', 'MAS': '마스코'
+        'VLO': '발레로에너지', 'MTD': '메틀러토레도', 'MAS': '마스코',
+        'EXPD': '익스페디터스', 'CHRW': 'CH 로빈슨', 'UNP': '유니온 퍼시픽',
+        'HPQ': 'HP (휴렛팩커드)', 'FTNT': '포티넷', 'CRWD': '크라우드스트라이크',
+        'DELL': '델 테크놀로지스', 'NTAP': '넷앱', 'BBY': '베스트바이'
     }
     
     clean_sym = symbol.strip().upper()
     if clean_sym in korean_names:
         return korean_names[clean_sym]
         
-    # Fallback to fetching company name from yahoo search api
+    # Fallback to fetching company name from yahoo search api with clean formatting
     try:
         import urllib.request
         import json
@@ -190,7 +222,8 @@ def get_korean_company_name(symbol):
             quotes = data.get('quotes', [])
             if quotes:
                 eng_name = quotes[0].get('longname') or quotes[0].get('shortname') or symbol
-                return eng_name.replace("Inc.", "").replace("Corp.", "").replace("Corporation", "").replace("Co.", "").strip()
+                cleaned = eng_name.replace(" , Ltd.", "").replace(" ,Ltd", "").replace(" ,", "").replace(", Inc.", "").replace(", Corp.", "").replace(", Corporation", "").replace(", Ltd.", "").replace(" Inc.", "").replace(" Corp.", "").rstrip(",").strip()
+                return cleaned if cleaned else symbol
     except Exception:
         pass
         
@@ -696,10 +729,12 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             # 회사 한국어 이름과 코드 통합 표기
             company_name = get_korean_company_name(sym)
             clean_name = company_name if company_name != sym else name
-            stock_display = f"{company_name} ({sym})" if company_name != sym else sym
             
-            # 전날 추천 내역과 비교하여 Action 판정
-            # 어제 추천에 이미 있었으면 HOLD, 새로 추천에 편입되었으면 BUY
+            # 국장/미장 국기 이모지 표기
+            flag = "🇺🇸" if market == "SP500" else "🇰🇷"
+            stock_display = f"{flag} {sym}"
+            
+            # 전날 추천 내역과 비교하여 Action 판정 (어제 있었으면 HOLD, 신규 진입이면 BUY)
             action = "HOLD" if sym in prev_recommended else "BUY"
             
             currency = "USD" if market == "SP500" else "KRW"
@@ -731,33 +766,6 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             if res_create.status_code not in [200, 201]:
                 print(f"[Notion Recommend Warning] Page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
                 
-        # 3. 전날 추천에 있었으나 오늘 탈락한 종목들 (SELL) 생성
-        today_tickers = {item.get("symbol", "") for item in portfolio_list}
-        for prev_sym, prev_info in prev_recommended.items():
-            if prev_sym not in today_tickers:
-                create_url = "https://api.notion.com/v1/pages"
-                today_str = datetime.datetime.now().strftime("%Y-%m-%d")
-                payload = {
-                    "parent": {"database_id": db_id},
-                    "properties": {
-                        "Name": {"title": [{"text": {"content": prev_info["name"]}}]},
-                        "Symbol": {"rich_text": [{"text": {"content": prev_info["symbol_display"]}}]},
-                        "Market": {"rich_text": [{"text": {"content": prev_info["market"]}}]},
-                        "Industry": {"rich_text": [{"text": {"content": prev_info["industry"]}}]},
-                        "NewsScore": {"rich_text": [{"text": {"content": "-"}}]},
-                        "Weight": {"rich_text": [{"text": {"content": "0.00%"}}]},
-                        "InvestAmount": {"rich_text": [{"text": {"content": "보유금의 0.00%"}}]},
-                        "Currency": {"select": {"name": prev_info["currency"]}},
-                        "Action": {"select": {"name": "SELL"}},
-                        "Weight (%)": {"number": 0.0},
-                        "보유금 대비 비중 (%)": {"number": 0.0},
-                        "Date": {"date": {"start": today_str}}
-                    }
-                }
-                res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
-                if res_create.status_code not in [200, 201]:
-                    print(f"[Notion Recommend SELL Warning] Page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
-            
         print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다.")
     except Exception as e:
         print(f"[Notion Recommend Error] {e}")
@@ -836,7 +844,7 @@ def sync_rankings_to_notion(rankings_list):
             # 회사 한국어 이름과 코드 통합 표기
             company_name = get_korean_company_name(sym)
             clean_name = company_name if company_name != sym else name
-            stock_display = f"{company_name} ({sym})" if company_name != sym else sym
+            stock_display = f"🇰🇷 {sym}"
             
             display_name = f"[{rank_val}위] {clean_name}"
             payload = {
@@ -866,7 +874,7 @@ def sync_rankings_to_notion(rankings_list):
             # 회사 한국어 이름과 코드 통합 표기
             company_name = get_korean_company_name(sym)
             clean_name = company_name if company_name != sym else name
-            stock_display = f"{company_name} ({sym})" if company_name != sym else sym
+            stock_display = f"🇺🇸 {sym}"
             
             display_name = f"[{rank_val}위] {clean_name}"
             payload = {
