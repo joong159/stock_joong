@@ -1313,12 +1313,15 @@ if __name__ == "__main__":
                 log_info(f"  * 미국 주식 (USD): 예수금 ${cash_balance_usd:,.2f} | 주식 ${current_us_value_usd:,.2f} | 총자산 ${total_us_assets_usd:,.2f} (종목당 목표 ${target_val_per_stock_usd:,.2f})")
                 log_info(f"  * 국내 주식 (KRW): 예수금 {cash_balance_krw:,.0f}원 | 주식 {current_kr_value_krw:,.0f}원 | 총자산 {total_kr_assets_krw:,.0f}원 (종목당 목표 {target_val_per_stock_krw:,.0f}원)")
                 
-                # 2단계: 신규 매수 편입 종목 선정 (미국/한국 시장별로 각각 독립적으로 슬롯 충전)
-                if not is_us_winter:
-                    # 미국 주식 충전 (가용 슬롯: 5 - kept_us_symbols)
-                    us_slots = 5 - len(kept_us_symbols)
-                    if us_slots > 0:
-                        log_info(f"[미국 포트폴리오] 신규 편입 가능 슬롯: {us_slots}개")
+                # 2단계: 신규 매수 편입 종목 선정 (주간 리밸런싱 - 월요일 또는 테스트/강제 매수 시만 집행)
+                is_rebalance_day = (datetime.datetime.now().weekday() == 0) or args_cli.test or getattr(args_cli, 'force', False)
+                
+                if is_rebalance_day:
+                    if not is_us_winter:
+                        # 미국 주식 충전 (가용 슬롯: 5 - kept_us_symbols)
+                        us_slots = 5 - len(kept_us_symbols)
+                        if us_slots > 0:
+                            log_info(f"[미국 포트폴리오] 월요일 신규 편입 가능 슬롯: {us_slots}개")
                         top_picks_us = alpha_results_us.head(5).index
                         buy_candidates_us = [t for t in top_picks_us if get_toss_symbol(t) not in kept_us_symbols]
                         to_buy_us = buy_candidates_us[:us_slots]
