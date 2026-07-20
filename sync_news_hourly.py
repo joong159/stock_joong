@@ -78,16 +78,17 @@ def main():
     
     # 1. 모니터링할 종목 목록 추출
     targets = get_active_symbols_from_notion()
-    print(f"모니터링 대상 종목: {[t[0] for t in targets]}", flush=True)
+    print(f"Monitoring target count: {len(targets)} stocks", flush=True)
     
     # 2. 각 종목별 실시간 뉴스 수집 (국장은 Google News RSS, 미장은 yfinance + Google News RSS 폴백)
     aggregated_news = []
     for symbol, name in targets:
-        print(f"[{symbol} - {name}] 뉴스 수집 중...", flush=True)
+        clean_sym = symbol.replace("🇰🇷", "").replace("🇺🇸", "").strip()
+        print(f"[{clean_sym}] Fetching news...", flush=True)
         try:
-            ticker_news = fetch_stock_news(symbol, name)
+            ticker_news = fetch_stock_news(clean_sym, name)
             if ticker_news:
-                print(f"  -> {len(ticker_news)}개의 기사 수집 완료.", flush=True)
+                print(f"  -> {len(ticker_news)} items fetched.", flush=True)
                 aggregated_news.extend(ticker_news)
             else:
                 print(f"  -> 새로운 기사가 없습니다.", flush=True)
