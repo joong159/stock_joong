@@ -535,13 +535,10 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
                     try:
                         date_str = date_prop["start"]
                         if "T" in date_str:
-                            # Parse ISO format (handling optional offset)
                             clean_date_str = date_str.split("+")[0].split("Z")[0]
                             dt = datetime.datetime.fromisoformat(clean_date_str)
                         else:
                             dt = datetime.datetime.strptime(date_str, "%Y-%m-%d")
-                            
-                        # 3일(72시간) 초과 시 아카이브 처리
                         if (now - dt).total_seconds() > 3 * 24 * 3600:
                             requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                             if link_url in existing_links:
@@ -554,11 +551,9 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
         for art in news_list:
             link = art.get("link", "")
             if link and link in existing_links:
-                continue # 중복 뉴스 패스!
+                continue
                 
             create_url = "https://api.notion.com/v1/pages"
-            
-            # 시간 파싱
             pub_time = art.get("time")
             if isinstance(pub_time, (int, float)):
                 try:
@@ -569,20 +564,15 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
             else:
                 date_str = datetime.datetime.now().isoformat()
                 
-            # 영문 뉴스 한글 번역
             raw_title = art.get("title", "뉴스 헤드라인")
             korean_title = translate_headline_to_korean(raw_title, fast=fast_translate)
             
-            # 국장/미장 시장 분류
             sym = art.get("symbol", "")
             is_us = not (sym.endswith('.KS') or sym.endswith('.KQ'))
             market_val = "S&P500" if is_us else "KRX"
             
-            # 회사 한국어 이름과 코드 통합 표기
             company_name = get_korean_company_name(sym)
             stock_display = f"{company_name} ({sym})" if company_name != sym else sym
-            
-            # 개별 뉴스 호재/악재 감성 분석 판별
             sentiment_val, _ = get_single_news_sentiment(raw_title, korean_title)
             
             payload = {
@@ -603,13 +593,13 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
                 if link:
                     existing_links.add(link)
             
-        print(f"[Notion News] 성공적으로 {inserted_count}개의 새로운 시장 뉴스를 동기화했습니다. (중복 스킵 완료)")
+        print(f"[Notion News] 성공적으로 {inserted_count}개의 새로운 시장 뉴스를 동기화했습니다.")
     except Exception as e:
         print(f"[Notion News Error] {e}")
 
 def ensure_recommend_db_properties(db_id):
     """
-    💡 퀀트 추천 포트폴리오 데이터베이스에 액션(Action), 수치형 비중(Weight (%)), 보유금 대비 비중 (%) 속성이
+    💡 퀀트 추천 포트폴리오 데이터베이스에 액션(Action), 수치형 비중(Weight (%)), 보유금 대비 비중 (%), 전일 대비 속성이
     존재하고 올바른 타입으로 정의되어 있는지 확인하고 자동 추가/수정합니다.
     """
     url = f"https://api.notion.com/v1/databases/{db_id}"
@@ -634,6 +624,9 @@ def ensure_recommend_db_properties(db_id):
                     "format": "percent"
                 }
             },
+            "전일 대비": {
+                "rich_text": {}
+            },
             "Date": {
                 "date": {}
             }
@@ -656,65 +649,55 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
         
     db_id = find_database_by_name("💡 퀀트 추천 포트폴리오")
     if not db_id:
-        print("[Notion Recommend] '퀀트 추천 포트폴리오' 데이터베이스를 찾을 수 없어 동기화를 건너뜜니다.")
+        print("[Notion Recommend] '퀀트 추천 포트폴리오' 데이터베이스를 찾을 수 없어 동기화를 건너뜁니다.")
         return
         
     try:
         # 데이터베이스 속성(스키마) 유효성 보장 및 보강
         ensure_recommend_db_properties(db_id)
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
         
-        # 1. 기존 노션 추천 포트폴리오 항목 읽기 및 아카이브 처리
+        # 1. 기존 노션 추천 포트폴리오 항목 조회 (어제 데이터는 캘린더용으로 보존하고, 오늘 항목만 덮어쓰기 위해 아카이브)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
         res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
         
-        prev_recommended = {}
+        prev_weights = {} # {ticker: weight_pct}
         if res.status_code == 200:
             results = res.json().get("results", [])
             for page in results:
                 page_id = page.get("id")
                 props = page.get("properties", {})
                 
+                # 날짜 추출
+                date_prop = props.get("Date", {}).get("date", {})
+                page_date = date_prop.get("start", "") if date_prop else ""
+                
                 # Symbol 추출
                 symbol_prop = props.get("Symbol", {}).get("rich_text", [])
                 symbol_txt = "".join([t.get("plain_text", "") for t in symbol_prop]).strip()
                 
                 if not symbol_txt:
-                    requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                    if page_date == today_str:
+                        requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                     continue
                 
-                # 괄호에서 티커 추출 (예: "삼성전자 (005930.KS)" -> "005930.KS")
+                # 티커 추출 (예: "🇺🇸 AAPL" -> "AAPL", "005930.KS" -> "005930.KS")
                 import re
-                match = re.search(r'\(([^)]+)\)', symbol_txt)
+                match = re.search(r'([A-Za-z0-9\.\-]+)$', symbol_txt)
                 ticker = match.group(1).strip() if match else symbol_txt
                 
-                # Name 추출
-                name_prop = props.get("Name", {}).get("title", [])
-                name_txt = "".join([t.get("plain_text", "") for t in name_prop]).strip()
+                # 비중 수치 추출
+                weight_num = props.get("Weight (%)", {}).get("number", None)
+                if weight_num is not None:
+                    weight_pct = weight_num * 100.0 if weight_num <= 1.0 else weight_num
+                    prev_weights[ticker] = weight_pct
                 
-                # Market 추출
-                market_prop = props.get("Market", {}).get("rich_text", [])
-                market_txt = "".join([t.get("plain_text", "") for t in market_prop]).strip()
+                # 오늘 이미 등록된 페이지라면 중복 방지를 위해 아카이브(삭제) 처리
+                # 과거 날짜 페이지는 아카이브하지 않고 캘린더 기록용으로 보존합니다!
+                if page_date == today_str:
+                    requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                 
-                # Industry 추출
-                industry_prop = props.get("Industry", {}).get("rich_text", [])
-                industry_txt = "".join([t.get("plain_text", "") for t in industry_prop]).strip()
-                
-                # Currency 추출
-                currency_prop = props.get("Currency", {}).get("select", {})
-                currency_txt = currency_prop.get("name", "KRW") if currency_prop else "KRW"
-                
-                prev_recommended[ticker] = {
-                    "name": name_txt,
-                    "symbol_display": symbol_txt,
-                    "market": market_txt,
-                    "industry": industry_txt,
-                    "currency": currency_txt
-                }
-                
-                # 기존 항목 아카이브 처리
-                requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
-                
-        # 2. 신규 추천 항목 생성 (어제 추천 내역 대조를 통한 BUY / HOLD 판정)
+        # 2. 신규 추천 항목 생성 (어제 비중 대조를 통한 전일 대비 변동률 및 BUY / HOLD 판정)
         for item in portfolio_list:
             create_url = "https://api.notion.com/v1/pages"
             
@@ -734,8 +717,20 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             flag = "🇺🇸" if market == "SP500" else "🇰🇷"
             stock_display = f"{flag} {sym}"
             
-            # 전날 추천 내역과 비교하여 Action 판정 (어제 있었으면 HOLD, 신규 진입이면 BUY)
-            action = "HOLD" if sym in prev_recommended else "BUY"
+            # 전날 비중 대조하여 전일 대비 변동 계산
+            prev_w = prev_weights.get(sym, None)
+            if prev_w is None:
+                action = "BUY"
+                diff_str = "🆕 신규 편입"
+            else:
+                action = "HOLD"
+                diff = weight - prev_w
+                if abs(diff) < 0.01:
+                    diff_str = "➖ 변동 없음"
+                elif diff > 0:
+                    diff_str = f"🔺 +{diff:.2f}%p"
+                else:
+                    diff_str = f"🔻 {diff:.2f}%p"
             
             currency = "USD" if market == "SP500" else "KRW"
             score_str = f"{score:+.2f}"
@@ -743,7 +738,6 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             amount_str = f"보유금의 {weight:.2f}%"
             
             weight_val = weight / 100.0
-            today_str = datetime.datetime.now().strftime("%Y-%m-%d")
             
             payload = {
                 "parent": {"database_id": db_id},
@@ -759,6 +753,7 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                     "Action": {"select": {"name": action}},
                     "Weight (%)": {"number": weight_val},
                     "보유금 대비 비중 (%)": {"number": weight_val},
+                    "전일 대비": {"rich_text": [{"text": {"content": diff_str}}]},
                     "Date": {"date": {"start": today_str}}
                 }
             }
@@ -766,7 +761,9 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             if res_create.status_code not in [200, 201]:
                 print(f"[Notion Recommend Warning] Page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
                 
-        print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다.")
+        print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다. (전일 대비 변동 기록 완료)")
+    except Exception as e:
+        print(f"[Notion Recommend Error] {e}")
     except Exception as e:
         print(f"[Notion Recommend Error] {e}")
 
