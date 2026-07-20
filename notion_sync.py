@@ -232,12 +232,14 @@ def get_korean_company_name(symbol):
 def find_database_by_name(name):
     """
     노션 워크스페이스에 공유된 데이터베이스 중 이름이 일치하는 데이터베이스 ID를 검색합니다.
+    - 이모지가 포함된 경우 검색 쿼리 이모지를 제거하여 정확하게 매칭합니다.
     """
     if not NOTION_TOKEN:
         return None
+    clean_query = name.replace("💡", "").replace("🏆", "").replace("🚨", "").replace("📰", "").replace("📊", "").strip()
     url = "https://api.notion.com/v1/search"
     payload = {
-        "query": name,
+        "query": clean_query,
         "filter": {
             "property": "object",
             "value": "database"
@@ -250,7 +252,7 @@ def find_database_by_name(name):
             for db in results:
                 title_list = db.get("title", [])
                 db_title = "".join([t.get("plain_text", "") for t in title_list])
-                if db_title.strip() == name:
+                if clean_query in db_title:
                     return db.get("id")
         else:
             print(f"[Notion Search Warning] Status: {res.status_code}, Res: {res.text}")
@@ -764,8 +766,6 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
         print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다. (전일 대비 변동 기록 완료)")
     except Exception as e:
         print(f"[Notion Recommend Error] {e}")
-    except Exception as e:
-        print(f"[Notion Recommend Error] {e}")
 
 def ensure_ranking_db_properties(db_id):
     """
@@ -1164,6 +1164,43 @@ def setup_notion_workspace():
             else:
                 return f"'🏆 미장 퀀트 종목 랭킹' 디비 생성 실패: {c_res.text}"
 
+        # 8. '🚨 퀀트 매도 시그널' 데이터베이스 생성
+        sell_db_id = find_database_by_name("🚨 퀀트 매도 시그널")
+        if not sell_db_id:
+            create_url = "https://api.notion.com/v1/databases"
+            db_payload = {
+                "parent": {"type": "page_id", "page_id": parent_page_id},
+                "title": [{"type": "text", "text": {"content": "🚨 퀀트 매도 시그널"}}],
+                "properties": {
+                    "Name": {"title": {}},
+                    "Symbol": {"rich_text": {}},
+                    "Reason": {"rich_text": {}},
+                    "Date": {"date": {}},
+                    "Market": {
+                        "select": {
+                            "options": [
+                                {"name": "KRX", "color": "green"},
+                                {"name": "S&P500", "color": "blue"}
+                            ]
+                        }
+                    },
+                    "Action": {
+                        "select": {
+                            "options": [
+                                {"name": "BUY", "color": "green"},
+                                {"name": "HOLD", "color": "yellow"},
+                                {"name": "SELL", "color": "red"}
+                            ]
+                        }
+                    }
+                }
+            }
+            c_res = requests.post(create_url, headers=HEADERS, json=db_payload, timeout=10)
+            if c_res.status_code == 200:
+                created_count += 1
+            else:
+                return f"'🚨 퀀트 매도 시그널' 디비 생성 실패: {c_res.text}"
+
         if created_count > 0:
             return f"성공적으로 {created_count}개의 데이터베이스를 노션 페이지 하위에 생성/연동 완료했습니다!"
         else:
@@ -1171,6 +1208,81 @@ def setup_notion_workspace():
             
     except Exception as e:
         return f"노션 자동 설정 중 오류 발생: {e}"
+
+def sync_sell_signals_to_notion(sell_list):
+    """
+    오늘 매도(SELL) 시그널이 발생한 종목들을 '🚨 퀀트 매도 시그널' 데이터베이스에 동기화합니다.
+    - sell_list: [{"symbol": sym, "name": name, "reason": reason, "market": mkt}] 리스트
+    """
+    if not NOTION_TOKEN:
+        return
+        
+    db_id = find_database_by_name("🚨 퀀트 매도 시그널")
+    if not db_id:
+        print("[Notion Sell Signal] Database 'SELL Signal' not found. Creating...")
+        setup_notion_workspace()
+        db_id = find_database_by_name("🚨 퀀트 매도 시그널")
+        if not db_id:
+            return
+            
+    try:
+        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        
+        # 1. 오늘 날짜로 이미 동기화된 매도 시그널 항목 아카이브 (중복 방지)
+        query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+        if res.status_code == 200:
+            for page in res.json().get("results", []):
+                date_prop = page.get("properties", {}).get("Date", {}).get("date", {})
+                page_date = date_prop.get("start", "") if date_prop else ""
+                if page_date == today_str:
+                    requests.patch(f"https://api.notion.com/v1/pages/{page.get('id')}", headers=HEADERS, json={"archived": True}, timeout=10)
+                    
+        # 2. 오늘 매도 항목 생성
+        if sell_list:
+            for item in sell_list:
+                create_url = "https://api.notion.com/v1/pages"
+                sym = item.get("symbol", "")
+                name = item.get("name", "")
+                reason = item.get("reason", "손절선 이탈 또는 비중 교체")
+                mkt = item.get("market", "KRX" if (sym.endswith(".KS") or sym.endswith(".KQ")) else "S&P500")
+                
+                c_name = get_korean_company_name(sym)
+                clean_name = c_name if c_name != sym else name
+                flag = "🇺🇸" if mkt == "S&P500" else "🇰🇷"
+                stock_disp = f"{flag} {sym}"
+                
+                payload = {
+                    "parent": {"database_id": db_id},
+                    "properties": {
+                        "Name": {"title": [{"text": {"content": clean_name}}]},
+                        "Symbol": {"rich_text": [{"text": {"content": stock_disp}}]},
+                        "Action": {"select": {"name": "SELL"}},
+                        "Reason": {"rich_text": [{"text": {"content": reason}}]},
+                        "Market": {"select": {"name": mkt}},
+                        "Date": {"date": {"start": today_str}}
+                    }
+                }
+                requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            print(f"[Notion Sell Signal] Synced {len(sell_list)} SELL items.")
+        else:
+            # 매도 종목이 없으면 '안전' 안내 카드 추가
+            create_url = "https://api.notion.com/v1/pages"
+            payload = {
+                "parent": {"database_id": db_id},
+                "properties": {
+                    "Name": {"title": [{"text": {"content": "🟢 오늘 매도할 종목이 없습니다 (안전 보유 중)"}}]},
+                    "Symbol": {"rich_text": [{"text": {"content": "안전"}}]},
+                    "Action": {"select": {"name": "HOLD"}},
+                    "Reason": {"rich_text": [{"text": {"content": "모든 보유 종목이 손절선 위에서 안정적으로 추세를 유지하고 있습니다."}}]},
+                    "Market": {"select": {"name": "KRX"}},
+                    "Date": {"date": {"start": today_str}}
+                }
+            }
+            requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
+            print("[Notion Sell Signal] No SELL signals today (Added safety info page).")
+    except Exception as e:
+        print(f"[Notion Sell Signal Error] {e}")
 
 def decorate_notion_workspace():
     """

@@ -1720,6 +1720,31 @@ if __name__ == "__main__":
                     if recommend_list:
                         sync_recommended_portfolio_to_notion(recommend_list)
                         
+                        # 🚨 매도(SELL) 시그널 전용 데이터베이스 동기화
+                        try:
+                            from notion_sync import sync_sell_signals_to_notion
+                            sell_items = [
+                                {
+                                    "symbol": item["symbol"],
+                                    "name": item["name"],
+                                    "reason": "Chandelier Exit 손절선 이탈 또는 퀀트 랭킹 하락 교체",
+                                    "market": item["market"]
+                                }
+                                for item in recommend_list if item.get("action") == "SELL"
+                            ]
+                            for rebal in rebal_data:
+                                if rebal.get("Action") == "SELL":
+                                    if not any(s["symbol"] == rebal["Toss_Symbol"] or s["symbol"] == rebal["Ticker"] for s in sell_items):
+                                        sell_items.append({
+                                            "symbol": rebal["Toss_Symbol"],
+                                            "name": rebal["Name"],
+                                            "reason": rebal.get("Reason", "매도 시그널 발생"),
+                                            "market": "KRX" if (rebal["Toss_Symbol"].endswith(".KS") or rebal["Toss_Symbol"].endswith(".KQ")) else "S&P500"
+                                        })
+                            sync_sell_signals_to_notion(sell_items)
+                        except Exception as ex_sell:
+                            print(f"[Notion Sell Sync Error] {ex_sell}")
+                        
                     # 2. 국장/미장 종목 랭킹 작성 및 동기화 (Top 20씩)
                     rankings_list = []
                     
