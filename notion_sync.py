@@ -1384,10 +1384,53 @@ def decorate_notion_workspace():
     except Exception as e:
         return f"노션 디자인 꾸미기 중 오류 발생: {e}"
 
+def calculate_portfolio_returns():
+    """
+    월요일 매수 가정을 기반으로 퀀트 추천 포트폴리오의 주간 수익률 및 월간 수익률을 연산합니다.
+    """
+    try:
+        import yfinance as yf
+        import numpy as np
+        us_picks = ['AAPL', 'UNP', 'CHRW', 'HPQ', 'EXPD']
+        kr_picks = ['000270.KS', '055550.KS', '011200.KS', '105560.KS', '033780.KS']
+        all_tickers = us_picks + kr_picks
+        
+        now = datetime.datetime.now()
+        monday_this_week = (now - datetime.timedelta(days=now.weekday())).strftime("%Y-%m-%d")
+        monday_last_week = (now - datetime.timedelta(days=now.weekday() + 7)).strftime("%Y-%m-%d")
+        
+        first_day = datetime.date(now.year, now.month, 1)
+        first_monday = first_day + datetime.timedelta(days=(7 - first_day.weekday()) % 7)
+        monday_first_month = first_monday.strftime("%Y-%m-%d")
+        
+        df_prices = yf.download(all_tickers, start=(now - datetime.timedelta(days=45)).strftime("%Y-%m-%d"), progress=False)
+        
+        def calc_ret(start_dt):
+            rets = []
+            for t in all_tickers:
+                try:
+                    df_t = df_prices[t].dropna() if isinstance(df_prices.columns, pd.MultiIndex) else df_prices.dropna()
+                    post = df_t.loc[start_dt:]
+                    if len(post) >= 2:
+                        p0 = post['Close'].iloc[0]
+                        p1 = post['Close'].iloc[-1]
+                        if isinstance(p0, pd.Series): p0 = p0.iloc[0]
+                        if isinstance(p1, pd.Series): p1 = p1.iloc[0]
+                        rets.append(((p1 - p0) / p0) * 100.0)
+                except Exception:
+                    pass
+            return float(np.mean(rets)) if rets else 0.0
+            
+        w_ret = calc_ret(monday_last_week if now.weekday() == 0 else monday_this_week)
+        m_ret = calc_ret(monday_first_month)
+        return w_ret, m_ret
+    except Exception as e:
+        print(f"[Return Calc Warning] {e}")
+        return 0.0, 0.0
+
 def update_notion_regime_style(regime_val):
     """
-    현재 매크로 국면에 따라 노션 대시보드 페이지의 커버 이미지와 이모지를 동적으로 변경합니다.
-    - 국장/미장 개별 시장 계절을 모두 반영하여 다단으로 보여줍니다.
+    현재 매크로 국면에 따라 노션 대시보드 페이지의 커버 이미지와 이모지를 동적으로 변경하고 메인 수익률 현황판을 업데이트합니다.
     """
     if not NOTION_TOKEN:
         return
@@ -1492,13 +1535,20 @@ def update_notion_regime_style(regime_val):
                 if block.get("type") == "callout":
                     c_texts = block.get("callout", {}).get("rich_text", [])
                     c_text = "".join([t.get("plain_text", "") for t in c_texts]).strip()
-                    if "현재 시장 계절" in c_text or "시장 계절:" in c_text or "미국 시장 (S&P500):" in c_text:
+                    if "현재 시장 계절" in c_text or "시장 계절:" in c_text or "미국 시장 (S&P500):" in c_text or "퀀트 추천 포트폴리오 성과" in c_text:
                         regime_block_id = block.get("id")
                         break
 
-        # 4. 현황판에 표시할 텍스트 템플릿 구성 (국장/미장 분리)
+        # 4. 현황판에 표시할 텍스트 템플릿 구성 (수익률 현황 + 국장/미장 계절 분리)
+        w_ret, m_ret = calculate_portfolio_returns()
+        w_str = f"+{w_ret:.2f}% 🔺" if w_ret > 0 else (f"{w_ret:.2f}% 🔻" if w_ret < 0 else "0.00% ➖")
+        m_str = f"+{m_ret:.2f}% 🔺" if m_ret > 0 else (f"{m_ret:.2f}% 🔻" if m_ret < 0 else "0.00% ➖")
+
         regime_text = (
-            f"현재 시장 계절 (Market Season Summary)\n"
+            f"📊 퀀트 추천 포트폴리오 수익률 성과 현황 (월요일 매수 가정)\n"
+            f"• 🗓️ 주간 수익률 (이번 주 월요일 매수 시): {w_str}\n"
+            f"• 📅 월간 수익률 (이번 달 첫 월요일 매수 시): {m_str}\n\n"
+            f"🌐 현재 시장 계절 (Market Season Summary)\n"
             f"• 🇺🇸 미국 시장 (S&P500): {attr_us['emoji']} {attr_us['name']}\n"
             f"• 🇰🇷 한국 시장 (KRX): {attr_kr['emoji']} {attr_kr['name']}"
         )
