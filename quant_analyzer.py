@@ -493,11 +493,13 @@ def get_news_sentiment(ticker):
     except Exception:
         return 0.0
 
-def generate_portfolio(df_alpha, capital=5000000, is_winter=False):
+def generate_portfolio(df_alpha, capital=5000000, is_winter=False, market_regime='SPRING', data_ohlcv=None):
     """
     개별 풀(미국/한국) 기준 포트폴리오 비중 배분 및 최고 순위 5개 선정
+    - 고도화 1: Risk Parity (변동성 역비중 자산배분) -> 변동성(14일 ATR%)이 적은 종목 비중 확대, 변동성 큰 위험 종목 비중 축소
+    - 고도화 2: 가을(FALL) 국면 진입 시 주식 비중 50% 제한 + 현금 50% 방어 쿠션 자동 세팅
     """
-    if is_winter:
+    if is_winter or market_regime == 'WINTER':
         log_warn("시장 위축/위기 국면(WINTER)이므로 신규 매수 및 추천 포트폴리오 편입을 차단합니다 (현금 100% 보유).")
         return pd.DataFrame()
 
@@ -509,20 +511,46 @@ def generate_portfolio(df_alpha, capital=5000000, is_winter=False):
     top_picks = positive_alpha.head(5).copy()
     top_picks = top_picks.sort_values(by='Pure_Alpha(%)', ascending=False)
     
-    weights = (top_picks['Pure_Alpha(%)'] / top_picks['Pure_Alpha(%)'].sum()) * 100
+    # 1. Risk Parity (변동성 역비중 자산배분) 계산
+    inv_vols = []
+    for ticker in top_picks.index:
+        try:
+            df_t = None
+            if data_ohlcv is not None:
+                if isinstance(data_ohlcv.columns, pd.MultiIndex) and ticker in data_ohlcv.columns.levels[0]:
+                    df_t = data_ohlcv[ticker].dropna()
+                else:
+                    df_t = data_ohlcv.dropna()
+            if df_t is None or len(df_t) < 20:
+                df_t = yf.download(ticker, period='2mo', progress=False).dropna()
+                
+            close_p = get_safe_close_price(df_t)
+            atr_val = AlphaFactory.alpha_atr(df_t, period=14)
+            atr_pct = (atr_val / close_p) if close_p > 0 and not pd.isna(atr_val) else 0.03
+            inv_vols.append(1.0 / max(atr_pct, 0.005))
+        except Exception:
+            inv_vols.append(1.0)
+            
+    top_picks['Inv_Vol'] = inv_vols
+    # Pure Alpha와 변동성 역수를 가중 조합하여 가중치(Composite Score) 산출
+    composite = top_picks['Pure_Alpha(%)'] * top_picks['Inv_Vol']
+    weights = (composite / composite.sum()) * 100.0
     
-    # 단일 종목 최대 비중 30% 상한 제한
-    max_weight = 30.0
+    # 가을(FALL / 하락 경계 국면) 시 주식 전체 목표 비중을 50%로 제한하여 50% 현금 쿠션 확보!
+    target_total_scale = 50.0 if market_regime == 'FALL' else 100.0
+    weights = weights * (target_total_scale / 100.0)
+    
+    # 단일 종목 최대 비중 상한 제한 (가을 국면 시 15%, 일반 시 30%)
+    max_weight = 15.0 if market_regime == 'FALL' else 30.0
     while weights.max() > max_weight:
         capped_mask = weights >= max_weight
         weights[capped_mask] = max_weight
         non_capped_sum = weights[~capped_mask].sum()
         if non_capped_sum == 0: 
             break
-        excess = 100.0 - weights.sum()
+        excess = target_total_scale - weights.sum()
         weights[~capped_mask] += excess * (weights[~capped_mask] / non_capped_sum)
         
-    # 총합 비중을 전체의 50%로 세팅하기 전 임시 100% 분배
     top_picks['Weight(%)'] = weights
     top_picks['Invest_Amount(KRW)'] = capital * (top_picks['Weight(%)'] / 100)
     return top_picks
@@ -777,10 +805,11 @@ def get_toss_symbol(target_ticker):
         return target_ticker.split('.')[0]
     return target_ticker
 
-def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None):
+def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None, purchase_price=None):
     """
-    Chandelier Exit (ATR 기반 트레일링 스톱) 조건 만족 여부를 검증합니다.
-    매도조건: 현재가 < 최고가 - (3 * ATR(14))
+    Chandelier Exit (ATR 기반 트레일링 스톱 + 수익 보장 타이트 익절) 조건 만족 여부를 검증합니다.
+    - 기본 매도조건: 현재가 < 최고가 - (3.0 * ATR(14))
+    - 고도화: 매수가 대비 최고가가 +15% 이상 달성된 경우, 이익 보존을 위해 트레일링 스톱을 (1.5 * ATR(14))로 타이트하게 바짝 당깁니다!
     """
     try:
         df_ticker = None
@@ -801,7 +830,13 @@ def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None)
             
         # ATR(14) 연산 호출
         atr = AlphaFactory.alpha_atr(df_ticker, period=14)
-        stop_price = highest_price - (3.0 * atr)
+        
+        # +15% 이익 도달 여부에 따라 트레일링 스톱 계수 결정 (기본 3.0 -> 타이트 익절 1.5)
+        multiplier = 3.0
+        if purchase_price and purchase_price > 0 and highest_price >= purchase_price * 1.15:
+            multiplier = 1.5
+            
+        stop_price = highest_price - (multiplier * atr)
         is_stop_hit = current_price < stop_price
         return is_stop_hit, stop_price
     except Exception as e:
@@ -973,11 +1008,13 @@ if __name__ == "__main__":
 
             log_info(f"통화별 자본금 설정: 미국 주식(USD계좌 - {cash_balance_usd:,.2f} USD = {us_capital:,.0f} KRW) / 국내 주식(KRW계좌 - {cash_balance_krw:,.0f} KRW)")
             
-            is_us_winter = "WINTER" in current_regime[0] if isinstance(current_regime, tuple) else "WINTER" in current_regime
-            is_kr_winter = "WINTER" in current_regime[1] if isinstance(current_regime, tuple) else "WINTER" in current_regime
+            us_regime_str = current_regime[0] if isinstance(current_regime, tuple) else current_regime
+            kr_regime_str = current_regime[1] if isinstance(current_regime, tuple) else current_regime
+            is_us_winter = "WINTER" in us_regime_str
+            is_kr_winter = "WINTER" in kr_regime_str
             
-            portfolio_us = generate_portfolio(alpha_results_us, capital=us_capital, is_winter=is_us_winter)
-            portfolio_kr = generate_portfolio(alpha_results_kr, capital=kr_capital, is_winter=is_kr_winter)
+            portfolio_us = generate_portfolio(alpha_results_us, capital=us_capital, is_winter=is_us_winter, market_regime=us_regime_str)
+            portfolio_kr = generate_portfolio(alpha_results_kr, capital=kr_capital, is_winter=is_kr_winter, market_regime=kr_regime_str)
             
             final_portfolio = pd.concat([portfolio_us, portfolio_kr])
             
@@ -1194,8 +1231,9 @@ if __name__ == "__main__":
                     # Chandelier Exit 검증
                     state_info = portfolio_state.get(sym, {})
                     highest_price = state_info.get("highest_price", curr["price_original"])
+                    purchase_price = state_info.get("purchase_price", curr["price_original"])
                     
-                    is_stop_hit, stop_price = check_chandelier_exit(ticker_name, curr["price_original"], highest_price, data_ohlcv)
+                    is_stop_hit, stop_price = check_chandelier_exit(ticker_name, curr["price_original"], highest_price, data_ohlcv, purchase_price=purchase_price)
                     
                     if is_stop_hit:
                         rebal_data.append({
