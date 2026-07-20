@@ -2,9 +2,11 @@ name: Auto Quant Rebalancing & News Sync
 
 on:
   schedule:
-    # 매 시간 14분, 44분에 실행 (30분 간격, 00/30분 혼잡 피하기)
-    - cron: '14,44 * * * *'
-  workflow_dispatch: # 수동 실행 버튼 제공
+    # 1. 한국 시장(KRX) 개장 직후 안정화 타임: 평일 한국시간 오전 09:30 (UTC 00:30)
+    - cron: '30 0 * * 1-5'
+    # 2. 미국 시장(S&P500) 개장 직후 안정화 타임: 평일 한국시간 오후 11:00 (UTC 14:00)
+    - cron: '0 14 * * 1-5'
+  workflow_dispatch: # 필요 시 언제든 수동 실행 가능 버튼 제공
 
 permissions:
   contents: write # 상태 파일(.portfolio_state.json, .market_regime.txt) 커밋/푸시 권한
