@@ -1400,8 +1400,7 @@ def calculate_portfolio_returns():
         monday_last_week = (now - datetime.timedelta(days=now.weekday() + 7)).strftime("%Y-%m-%d")
         
         first_day = datetime.date(now.year, now.month, 1)
-        first_monday = first_day + datetime.timedelta(days=(7 - first_day.weekday()) % 7)
-        monday_first_month = first_monday.strftime("%Y-%m-%d")
+        month_start_str = first_day.strftime("%Y-%m-%d")
         
         df_prices = yf.download(all_tickers, start=(now - datetime.timedelta(days=45)).strftime("%Y-%m-%d"), progress=False)
         
@@ -1422,7 +1421,7 @@ def calculate_portfolio_returns():
             return float(np.mean(rets)) if rets else 0.0
             
         w_ret = calc_ret(monday_last_week if now.weekday() == 0 else monday_this_week)
-        m_ret = calc_ret(monday_first_month)
+        m_ret = calc_ret(month_start_str)
         return w_ret, m_ret
     except Exception as e:
         print(f"[Return Calc Warning] {e}")
@@ -1535,7 +1534,7 @@ def update_notion_regime_style(regime_val):
                 if block.get("type") == "callout":
                     c_texts = block.get("callout", {}).get("rich_text", [])
                     c_text = "".join([t.get("plain_text", "") for t in c_texts]).strip()
-                    if "현재 시장 계절" in c_text or "시장 계절:" in c_text or "미국 시장 (S&P500):" in c_text or "퀀트 추천 포트폴리오 성과" in c_text:
+                    if "현재 시장 계절" in c_text or "시장 계절:" in c_text or "미국 시장 (S&P500):" in c_text or "퀀트 추천 포트폴리오" in c_text:
                         regime_block_id = block.get("id")
                         break
 
@@ -1544,10 +1543,11 @@ def update_notion_regime_style(regime_val):
         w_str = f"+{w_ret:.2f}% 🔺" if w_ret > 0 else (f"{w_ret:.2f}% 🔻" if w_ret < 0 else "0.00% ➖")
         m_str = f"+{m_ret:.2f}% 🔺" if m_ret > 0 else (f"{m_ret:.2f}% 🔻" if m_ret < 0 else "0.00% ➖")
 
+        now_m = datetime.datetime.now().month
         regime_text = (
             f"📊 퀀트 추천 포트폴리오 수익률 성과 현황 (월요일 매수 가정)\n"
             f"• 🗓️ 주간 수익률 (이번 주 월요일 매수 시): {w_str}\n"
-            f"• 📅 월간 수익률 (이번 달 첫 월요일 매수 시): {m_str}\n\n"
+            f"• 📅 {now_m}월 누적 수익률 ({now_m}/1 ~ 오늘): {m_str}\n\n"
             f"🌐 현재 시장 계절 (Market Season Summary)\n"
             f"• 🇺🇸 미국 시장 (S&P500): {attr_us['emoji']} {attr_us['name']}\n"
             f"• 🇰🇷 한국 시장 (KRX): {attr_kr['emoji']} {attr_kr['name']}"
