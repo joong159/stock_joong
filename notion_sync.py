@@ -1498,42 +1498,64 @@ def decorate_notion_workspace():
 
 def calculate_portfolio_returns():
     """
-    월요일 매수 가정을 기반으로 퀀트 추천 포트폴리오의 주간 수익률 및 월간 수익률을 연산합니다.
+    월요일 매수 가정을 기반으로 퀀트 추천 포트폴리오의 주간 수익률 및 월간 수익률을 동적으로 연산합니다.
     """
     try:
         import yfinance as yf
         import numpy as np
-        us_picks = ['AAPL', 'UNP', 'CHRW', 'HPQ', 'EXPD']
-        kr_picks = ['000270.KS', '055550.KS', '011200.KS', '105560.KS', '033780.KS']
-        all_tickers = us_picks + kr_picks
         
-        now = datetime.datetime.now()
-        monday_this_week = (now - datetime.timedelta(days=now.weekday())).strftime("%Y-%m-%d")
-        monday_last_week = (now - datetime.timedelta(days=now.weekday() + 7)).strftime("%Y-%m-%d")
-        
-        first_day = datetime.date(now.year, now.month, 1)
-        month_start_str = first_day.strftime("%Y-%m-%d")
-        
-        df_prices = yf.download(all_tickers, start=(now - datetime.timedelta(days=45)).strftime("%Y-%m-%d"), progress=False)
-        
-        def calc_ret(start_dt):
-            rets = []
-            for t in all_tickers:
-                try:
-                    df_t = df_prices[t].dropna() if isinstance(df_prices.columns, pd.MultiIndex) else df_prices.dropna()
-                    post = df_t.loc[start_dt:]
-                    if len(post) >= 2:
-                        p0 = post['Close'].iloc[0]
-                        p1 = post['Close'].iloc[-1]
-                        if isinstance(p0, pd.Series): p0 = p0.iloc[0]
-                        if isinstance(p1, pd.Series): p1 = p1.iloc[0]
-                        rets.append(((p1 - p0) / p0) * 100.0)
-                except Exception:
-                    pass
-            return float(np.mean(rets)) if rets else 0.0
+        # 1. 노션 '💡 퀀트 추천 포트폴리오' 종목 추출 시도
+        all_tickers = []
+        try:
+            portfolio_db_id = find_database_by_name("💡 퀀트 추천 포트폴리오")
+            if portfolio_db_id:
+                url = f"https://api.notion.com/v1/databases/{portfolio_db_id}/query"
+                res = requests.post(url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+                if res.status_code == 200:
+                    for p in res.json().get("results", []):
+                        props = p.get("properties", {})
+                        sym_list = props.get("Symbol", {}).get("rich_text", [])
+                        sym = sym_list[0].get("text", {}).get("content", "") if sym_list else ""
+                        clean_sym = sym.replace("🇺🇸", "").replace("🇰🇷", "").strip()
+                        if clean_sym and clean_sym not in all_tickers:
+                            all_tickers.append(clean_sym)
+        except Exception:
+            pass
             
-        w_ret = calc_ret(monday_last_week if now.weekday() == 0 else monday_this_week)
-        m_ret = calc_ret(month_start_str)
+        if not all_tickers:
+            all_tickers = ['AAPL', 'MSFT', 'CVX', '005930.KS', '000660.KS', '000270.KS', '055550.KS', '011200.KS', '105560.KS', '033780.KS']
+            
+        now = datetime.datetime.now()
+        df_prices = yf.download(all_tickers, period='60d', progress=False)
+        close_df = df_prices['Close'] if 'Close' in df_prices.columns else df_prices
+        
+        w_rets = []
+        m_rets = []
+        first_day_of_month = datetime.date(now.year, now.month, 1)
+        
+        for t in all_tickers:
+            try:
+                if t in close_df.columns:
+                    series_t = close_df[t].dropna()
+                    if len(series_t) >= 5:
+                        p_latest = float(series_t.iloc[-1])
+                        
+                        # 주간 (최근 5영업일 전 대비 변동 %)
+                        p_5d_ago = float(series_t.iloc[-5])
+                        w_rets.append(((p_latest - p_5d_ago) / p_5d_ago) * 100.0)
+                        
+                        # 월간 (당월 1일 이후 첫 거래일 대비 변동 %)
+                        m_post = series_t.loc[first_day_of_month.strftime("%Y-%m-%d"):]
+                        if len(m_post) > 0:
+                            p_m_start = float(m_post.iloc[0])
+                        else:
+                            p_m_start = float(series_t.iloc[-20])
+                        m_rets.append(((p_latest - p_m_start) / p_m_start) * 100.0)
+            except Exception:
+                pass
+                
+        w_ret = float(np.mean(w_rets)) if w_rets else 0.0
+        m_ret = float(np.mean(m_rets)) if m_rets else 0.0
         return w_ret, m_ret
     except Exception as e:
         print(f"[Return Calc Warning] {e}")
