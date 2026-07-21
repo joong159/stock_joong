@@ -16,5 +16,7 @@ dist/
 # Output and State files
 *.xlsx
 .portfolio_state.json
+.translation_cache.json
+*.png
 *.log
 
