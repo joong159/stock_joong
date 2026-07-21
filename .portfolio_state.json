@@ -8,13 +8,13 @@
     "MPC": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 315.30999755859375,
-        "highest_price": 315.30999755859375,
+        "highest_price": 317.1499938964844,
         "purchase_qty": 1.0
     },
     "AAPL": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 326.5899963378906,
-        "highest_price": 326.5899963378906,
+        "highest_price": 328.69000244140625,
         "purchase_qty": 1.0
     },
     "WDAY": {
@@ -62,7 +62,7 @@
     "000270.KS": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 144200.0,
-        "highest_price": 144200.0,
+        "highest_price": 144600.0,
         "purchase_qty": 1.0
     },
     "055550.KS": {
@@ -86,31 +86,31 @@
     "JPM": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 338.8699951171875,
-        "highest_price": 338.8699951171875,
+        "highest_price": 343.6199951171875,
         "purchase_qty": 1.0
     },
     "XOM": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 148.36000061035156,
-        "highest_price": 148.36000061035156,
+        "highest_price": 151.0749969482422,
         "purchase_qty": 1.0
     },
     "CVX": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 189.7100067138672,
-        "highest_price": 189.7100067138672,
+        "highest_price": 190.33999633789062,
         "purchase_qty": 1.0
     },
     "BAC": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 60.41999816894531,
-        "highest_price": 60.41999816894531,
+        "highest_price": 61.13999938964844,
         "purchase_qty": 1.0
     },
     "066570.KS": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 172900.0,
-        "highest_price": 172900.0,
+        "highest_price": 173200.0,
         "purchase_qty": 1.0
     },
     "000660.KS": {
@@ -122,19 +122,19 @@
     "AMD": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 503.57000732421875,
-        "highest_price": 503.57000732421875,
+        "highest_price": 535.4500122070312,
         "purchase_qty": 1.0
     },
     "GS": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 1055.030029296875,
-        "highest_price": 1055.030029296875,
+        "highest_price": 1080.512451171875,
         "purchase_qty": 1.0
     },
     "WFC": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 86.33000183105469,
-        "highest_price": 86.33000183105469,
+        "highest_price": 87.36000061035156,
         "purchase_qty": 1.0
     },
     "005930.KS": {
@@ -146,7 +146,7 @@
     "COP": {
         "purchase_date": "2026-07-21 05:56:32",
         "purchase_price": 115.68000030517578,
-        "highest_price": 115.68000030517578,
+        "highest_price": 117.08000183105469,
         "purchase_qty": 1.0
     }
 }
