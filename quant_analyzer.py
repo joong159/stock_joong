@@ -1303,11 +1303,17 @@ if __name__ == "__main__":
                 # 1. 미국 주식 (USD 풀)
                 current_us_value_usd = sum(item["qty"] * item["price_original"] for sym, item in holdings_dict.items() if item["currency"] == "USD")
                 total_us_assets_usd = cash_balance_usd + current_us_value_usd
+                if total_us_assets_usd <= 0.0:
+                    total_us_assets_usd = 10000.0 # 시뮤레이션 1만 달러 가상 자본
+                    cash_balance_usd = 10000.0
                 target_val_per_stock_usd = total_us_assets_usd / 5.0
                 
                 # 2. 국내 주식 (KRW 풀)
                 current_kr_value_krw = sum(item["qty"] * item["price_original"] for sym, item in holdings_dict.items() if item["currency"] == "KRW")
                 total_kr_assets_krw = cash_balance_krw + current_kr_value_krw
+                if total_kr_assets_krw <= 0.0:
+                    total_kr_assets_krw = 10000000.0 # 시뮬레이션 1,000만 원 가상 자본
+                    cash_balance_krw = 10000000.0
                 target_val_per_stock_krw = total_kr_assets_krw / 5.0
                 
                 log_info(f"📊 [통화별 실질 자금/예수금 한도 분배]")
