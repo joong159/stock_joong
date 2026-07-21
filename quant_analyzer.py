@@ -1409,8 +1409,8 @@ if __name__ == "__main__":
                     
                     # 실제 TOSS 주문 실행
                     if args_cli.execute:
-                        if not toss_client:
-                            log_error("TOSS API 인증 정보가 구성되지 않아 실제 주문을 보낼 수 없습니다. .env 파일을 세팅해 주세요.")
+                        if toss_client is None:
+                            log_info("[노션 시뮬레이터 모드] 토스증권 API 미연동 상태입니다. 실계좌 주문을 전송하지 않고 노션 대시보드 시뮬레이션으로 기록합니다.")
                         else:
                             log_warn("🚨 토스증권 API를 통해 계좌 실주문을 전송합니다.")
                             kr_open = is_kr_market_open()
@@ -1689,22 +1689,6 @@ if __name__ == "__main__":
                             "action": action
                         })
                         
-                    # 청산 대상 주식 (SELL) - 포트폴리오에는 없지만 rebal_data에서 SELL인 종목들 추가
-                    for rebal in rebal_data:
-                        if rebal["Action"] == "SELL":
-                            exists = any(item["symbol"] == rebal["Ticker"] or item["symbol"] == rebal["Toss_Symbol"] for item in recommend_list)
-                            if not exists:
-                                recommend_list.append({
-                                    "symbol": rebal["Toss_Symbol"],
-                                    "name": rebal["Name"],
-                                    "market": "KRX" if (rebal["Toss_Symbol"].isdigit() or rebal["Ticker"].endswith('.KS') or rebal["Ticker"].endswith('.KQ')) else "SP500",
-                                    "industry": "청산 대상",
-                                    "score": 0.0,
-                                    "weight": 0.0,
-                                    "amount": 0.0,
-                                    "action": "SELL"
-                                })
-                                
                     if recommend_list:
                         sync_recommended_portfolio_to_notion(recommend_list)
                         

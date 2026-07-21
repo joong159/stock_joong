@@ -616,6 +616,14 @@ def ensure_recommend_db_properties(db_id):
                     ]
                 }
             },
+            "Market": {
+                "select": {
+                    "options": [
+                        {"name": "🇰🇷 KRX (국장)", "color": "green"},
+                        {"name": "🇺🇸 S&P500 (미장)", "color": "blue"}
+                    ]
+                }
+            },
             "Weight (%)": {
                 "number": {
                     "format": "percent"
@@ -699,8 +707,10 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                 if page_date == today_str:
                     requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                 
-        # 2. 신규 추천 항목 생성 (어제 비중 대조를 통한 전일 대비 변동률 및 BUY / HOLD 판정)
-        for item in portfolio_list:
+        # 2. 신규 추천 항목 생성 (국장 🇰🇷 우선 정렬 후 미장 🇺🇸 정렬)
+        portfolio_list_sorted = sorted(portfolio_list, key=lambda x: 0 if x.get("market") in ["KRX", "KR"] else 1)
+        
+        for item in portfolio_list_sorted:
             create_url = "https://api.notion.com/v1/pages"
             
             sym = item.get("symbol", "")
@@ -711,13 +721,14 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             weight = item.get("weight", 0.0)
             amount = item.get("amount", 0.0)
             
+            is_krx = market in ["KRX", "KR"] or sym.endswith(".KS") or sym.endswith(".KQ")
+            market_tag = "🇰🇷 KRX (국장)" if is_krx else "🇺🇸 S&P500 (미장)"
+            flag = "🇰🇷" if is_krx else "🇺🇸"
+            stock_display = f"{flag} {sym}"
+            
             # 회사 한국어 이름과 코드 통합 표기
             company_name = get_korean_company_name(sym)
             clean_name = company_name if company_name != sym else name
-            
-            # 국장/미장 국기 이모지 표기
-            flag = "🇺🇸" if market == "SP500" else "🇰🇷"
-            stock_display = f"{flag} {sym}"
             
             # 전날 비중 대조하여 전일 대비 변동 계산
             prev_w = prev_weights.get(sym, None)
@@ -734,7 +745,7 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                 else:
                     diff_str = f"🔻 {diff:.2f}%p"
             
-            currency = "USD" if market == "SP500" else "KRW"
+            currency = "KRW" if is_krx else "USD"
             score_str = f"{score:+.2f}"
             weight_str = f"{weight:.2f}%"
             amount_str = f"보유금의 {weight:.2f}%"
@@ -746,7 +757,7 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                 "properties": {
                     "Name": {"title": [{"text": {"content": clean_name}}]},
                     "Symbol": {"rich_text": [{"text": {"content": stock_display}}]},
-                    "Market": {"rich_text": [{"text": {"content": market}}]},
+                    "Market": {"select": {"name": market_tag}},
                     "Industry": {"rich_text": [{"text": {"content": industry}}]},
                     "NewsScore": {"rich_text": [{"text": {"content": score_str}}]},
                     "Weight": {"rich_text": [{"text": {"content": weight_str}}]},
