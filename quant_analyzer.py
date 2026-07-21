@@ -991,40 +991,21 @@ if __name__ == "__main__":
                 alpha_results = pd.DataFrame()
             
         if not alpha_results.empty:
-            # 실시간 환율 조회 (미국 주식 및 달러 예수금 계산용)
+            # 실시간 환율 수집 (yfinance 글로벌 종가 연동)
             usd_krw = 1350.0
-            if toss_client:
-                try:
-                    usd_krw = toss_client.get_exchange_rate(base="USD", quote="KRW")
-                    log_info(f"실시간 적용 환율: 1 USD = {usd_krw:,.2f} KRW")
-                except Exception:
-                    pass
+            try:
+                rate_df = yf.download('KRW=X', period='1d', progress=False)
+                if not rate_df.empty:
+                    usd_krw = float(get_safe_close_price(rate_df))
+                    log_info(f"실시간 시장 환율: 1 USD = {usd_krw:,.2f} KRW")
+            except Exception:
+                log_info(f"기본 설정 환율 적용: 1 USD = {usd_krw:,.2f} KRW")
 
-            # --- 투자 자본금(Capital) 및 통화별 예수금 동적 연동 ---
+            # --- 시뮬레이터 운용 자본금 세팅 (50% 원화 / 50% 달러) ---
             capital_amount = args_cli.capital
-            cash_balance_krw = 0.0
-            cash_balance_usd = 0.0
+            cash_balance_krw = capital_amount * 0.5
+            cash_balance_usd = (capital_amount * 0.5) / usd_krw
             
-            if toss_client:
-                log_info("토스증권 계좌에서 실제 예수금(원화 및 달러)을 가져옵니다...")
-                try:
-                    cash_balance_krw = toss_client.get_buying_power(currency="KRW")
-                    log_success(f"실적용 계좌 원화 예수금: {cash_balance_krw:,.0f} KRW")
-                except Exception as e:
-                    log_warn(f"원화 예수금 로드 실패: {e}.")
-                    cash_balance_krw = capital_amount * 0.5
-                    
-                try:
-                    cash_balance_usd = toss_client.get_buying_power(currency="USD")
-                    log_success(f"실적용 계좌 달러 예수금: $ {cash_balance_usd:,.2f} USD")
-                except Exception as e:
-                    log_warn(f"달러 예수금 로드 실패: {e}.")
-                    cash_balance_usd = (capital_amount * 0.5) / usd_krw
-            else:
-                # 시뮬레이터 모드: 원화 자본금의 절반을 원화, 절반을 달러로 가상 세팅
-                cash_balance_krw = capital_amount * 0.5
-                cash_balance_usd = (capital_amount * 0.5) / usd_krw
-                
             # 전체 가용 자본금(원화 환산 총액) 계산
             capital_amount = cash_balance_krw + (cash_balance_usd * usd_krw)
             
@@ -1090,48 +1071,34 @@ if __name__ == "__main__":
                 # --- 리밸런싱 주문 수량 계산 및 TOSS API 연동 (느슨한 로테이션 + 샹들리에 에그짓) ---
                 df_rebal = pd.DataFrame()
                 toss_holdings = []
-                holdings_loaded_successfully = False
-
-                if toss_client:
-                    log_info("토스증권 계좌의 현재 보유 주식 잔고를 불러옵니다...")
+                log_info("포트폴리오 상태(Supabase/로컬)에서 가상 보유 종목 정보를 즉시 불러옵니다...")
+                state = load_portfolio_state()
+                for sym, info in state.items():
+                    # 원래 화폐 현재가는 yfinance에서 가져옴
+                    ticker_name = sym
+                    for t in alpha_results.index:
+                        if get_toss_symbol(t) == sym:
+                            ticker_name = t
+                            break
+                    price_original = 0.0
                     try:
-                        toss_holdings = toss_client.get_holdings()
-                        log_success(f"보유 잔고 조회 완료! (보유 종목 수: {len(toss_holdings)}개)")
-                        holdings_loaded_successfully = True
-                    except Exception as e:
-                        log_error(f"보유 잔고를 불러오지 못했습니다: {e}")
-                        
-                if not holdings_loaded_successfully:
-                    # 시뮬레이터 모드 혹은 API 실패 시: 로컬 파일/Supabase에서 가상 보유 주식 정보 불러오기
-                    log_info("TOSS API 비활성 혹은 호출 실패로 인해 포트폴리오 상태(Supabase/로컬)에서 가상 보유 종목 정보를 불러옵니다...")
-                    state = load_portfolio_state()
-                    toss_holdings = []
-                    for sym, info in state.items():
-                        # 원래 화폐 현재가는 yfinance에서 가져옴
-                        ticker_name = sym
-                        for t in alpha_results.index:
-                            if get_toss_symbol(t) == sym:
-                                ticker_name = t
-                                break
-                        price_original = 0.0
-                        try:
-                            ticker_df = yf.download(ticker_name, period='1d', progress=False)
-                            if not ticker_df.empty:
-                                price_original = get_safe_close_price(ticker_df)
-                        except Exception:
-                            pass
-                        
-                        is_us = not (ticker_name.endswith('.KS') or ticker_name.endswith('.KQ'))
-                        toss_holdings.append({
-                            "symbol": sym,
-                            "quantity": info.get("purchase_qty", 0.0),
-                            "lastPrice": price_original,
-                            "averagePurchasePrice": info.get("purchase_price", price_original),
-                            "currency": "USD" if is_us else "KRW"
-                        })
-                        
-                    # 만약 기존 가상 포트폴리오 상태가 텅 비어 있다면 퀀트 상위 추천 10종목으로 자동 초기화
-                    if not toss_holdings:
+                        ticker_df = yf.download(ticker_name, period='1d', progress=False)
+                        if not ticker_df.empty:
+                            price_original = get_safe_close_price(ticker_df)
+                    except Exception:
+                        pass
+                    
+                    is_us = not (ticker_name.endswith('.KS') or ticker_name.endswith('.KQ'))
+                    toss_holdings.append({
+                        "symbol": sym,
+                        "quantity": info.get("purchase_qty", 0.0),
+                        "lastPrice": price_original,
+                        "averagePurchasePrice": info.get("purchase_price", price_original),
+                        "currency": "USD" if is_us else "KRW"
+                    })
+                    
+                # 만약 기존 가상 포트폴리오 상태가 텅 비어 있다면 퀀트 상위 추천 10종목으로 자동 초기화
+                if not toss_holdings:
                         log_info("가상 보유 상태가 비어 있어 퀀트 랭킹 상위 종목으로 가상 보유 잔고를 초기 구성합니다...")
                         top_picks_combined = pd.concat([alpha_results_us.head(5), alpha_results_kr.head(5)]) if 'alpha_results_us' in locals() and 'alpha_results_kr' in locals() else alpha_results.head(10)
                         for t in top_picks_combined.index:
@@ -1832,7 +1799,7 @@ if __name__ == "__main__":
                             
                     if ('alpha_results_kr' in globals() or 'alpha_results_kr' in locals()) and not alpha_results_kr.empty:
                         krx_sorted = alpha_results_kr.sort_values(by="Pure_Alpha(%)", ascending=False)
-                        for idx, (ticker, row) in enumerate(krx_sorted.head(50).iterrows()):
+                        for idx, (ticker, row) in enumerate(krx_sorted.head(20).iterrows()):
                             rankings_list.append({
                                 "name": str(row.get("Name", ticker)),
                                 "symbol": str(ticker),
