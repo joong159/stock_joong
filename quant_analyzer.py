@@ -1071,56 +1071,34 @@ if __name__ == "__main__":
                 # --- 리밸런싱 주문 수량 계산 및 TOSS API 연동 (느슨한 로테이션 + 샹들리에 에그짓) ---
                 df_rebal = pd.DataFrame()
                 toss_holdings = []
-                log_info("포트폴리오 상태(Supabase/로컬)에서 가상 보유 종목 정보를 즉시 불러옵니다...")
-                state = load_portfolio_state()
-                for sym, info in state.items():
-                    # 원래 화폐 현재가는 yfinance에서 가져옴
-                    ticker_name = sym
-                    for t in alpha_results.index:
-                        if get_toss_symbol(t) == sym:
-                            ticker_name = t
-                            break
-                    price_original = 0.0
-                    try:
-                        ticker_df = yf.download(ticker_name, period='1d', progress=False)
-                        if not ticker_df.empty:
-                            price_original = get_safe_close_price(ticker_df)
-                    except Exception:
-                        pass
-                    
-                    is_us = not (ticker_name.endswith('.KS') or ticker_name.endswith('.KQ'))
-                    toss_holdings.append({
-                        "symbol": sym,
-                        "quantity": info.get("purchase_qty", 0.0),
-                        "lastPrice": price_original,
-                        "averagePurchasePrice": info.get("purchase_price", price_original),
-                        "currency": "USD" if is_us else "KRW"
-                    })
-                    
-                # 만약 기존 가상 포트폴리오 상태가 텅 비어 있다면 퀀트 상위 추천 10종목으로 자동 초기화
-                if not toss_holdings:
-                        log_info("가상 보유 상태가 비어 있어 퀀트 랭킹 상위 종목으로 가상 보유 잔고를 초기 구성합니다...")
-                        top_picks_combined = pd.concat([alpha_results_us.head(5), alpha_results_kr.head(5)]) if 'alpha_results_us' in locals() and 'alpha_results_kr' in locals() else alpha_results.head(10)
-                        for t in top_picks_combined.index:
-                            sym = get_toss_symbol(t)
-                            price_orig = 0.0
-                            try:
-                                t_df = yf.download(t, period='1d', progress=False)
-                                if not t_df.empty:
-                                    price_orig = get_safe_close_price(t_df)
-                            except Exception:
-                                pass
-                            is_us = not (t.endswith('.KS') or t.endswith('.KQ'))
-                            budget_krw = 1000000.0
-                            budget_val = (budget_krw / usd_krw) if (is_us and usd_krw > 0) else budget_krw
-                            qty = (budget_val / price_orig) if price_orig > 0 else 1.0
-                            toss_holdings.append({
-                                "symbol": sym,
-                                "quantity": qty,
-                                "lastPrice": price_orig,
-                                "averagePurchasePrice": price_orig,
-                                "currency": "USD" if is_us else "KRW"
-                            })
+                log_info("노션 '💡 퀀트 추천 포트폴리오'에서 전일/기존 추천 종목 정보를 불러옵니다...")
+                try:
+                    from notion_sync import get_previous_notion_recommended_symbols
+                    prev_notion_map = get_previous_notion_recommended_symbols()
+                    for sym, name in prev_notion_map.items():
+                        ticker_name = sym
+                        for t in alpha_results.index:
+                            if get_toss_symbol(t) == sym or t == sym:
+                                ticker_name = t
+                                break
+                        price_original = 0.0
+                        try:
+                            ticker_df = yf.download(ticker_name, period='1d', progress=False)
+                            if not ticker_df.empty:
+                                price_original = get_safe_close_price(ticker_df)
+                        except Exception:
+                            pass
+                        
+                        is_us = not (ticker_name.endswith('.KS') or ticker_name.endswith('.KQ'))
+                        toss_holdings.append({
+                            "symbol": sym,
+                            "quantity": 1.0,
+                            "lastPrice": price_original,
+                            "averagePurchasePrice": price_original,
+                            "currency": "USD" if is_us else "KRW"
+                        })
+                except Exception as ex_prev:
+                    log_warn(f"전일 노션 추천 종목 조회 예외: {ex_prev}")
                         
                 # TOSS 보유 종목 사전(Dict) 매핑
                 holdings_dict = {}

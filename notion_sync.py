@@ -1561,6 +1561,35 @@ def calculate_portfolio_returns():
         print(f"[Return Calc Warning] {e}")
         return 0.0, 0.0
 
+def get_previous_notion_recommended_symbols():
+    """
+    노션 '💡 퀀트 추천 포트폴리오' 데이터베이스에서 직전/기존 추천 종목 심볼 목록을 조회합니다.
+    """
+    if not NOTION_TOKEN:
+        return {}
+    db_id = find_database_by_name("💡 퀀트 추천 포트폴리오")
+    if not db_id:
+        return {}
+    
+    try:
+        url = f"https://api.notion.com/v1/databases/{db_id}/query"
+        res = requests.post(url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+        prev_symbols = {}
+        if res.status_code == 200:
+            for p in res.json().get("results", []):
+                props = p.get("properties", {})
+                sym_list = props.get("Symbol", {}).get("rich_text", [])
+                sym = sym_list[0].get("text", {}).get("content", "") if sym_list else ""
+                clean_sym = sym.replace("🇺🇸", "").replace("🇰🇷", "").strip()
+                name_list = props.get("Name", {}).get("title", [])
+                name = name_list[0].get("text", {}).get("content", "") if name_list else ""
+                if clean_sym:
+                    prev_symbols[clean_sym] = name
+        return prev_symbols
+    except Exception as e:
+        print(f"[Get Prev Notion Symbols Error] {e}")
+        return {}
+
 def update_notion_regime_style(regime_val):
     """
     현재 매크로 국면에 따라 노션 대시보드 페이지의 커버 이미지와 이모지를 동적으로 변경하고 메인 수익률 현황판을 업데이트합니다.
