@@ -206,39 +206,70 @@ def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
             log_error(f"S&P 500 목록 조회 실패: {e}")
             return pd.DataFrame()
     elif market == 'KRX':
-        log_info("KRX 상위 100개 종목 정보를 수집합니다.")
+        log_info("KRX 시가총액 상위 100개 종목 유니버스를 수집 및 도출합니다...")
+        stocks = {}
+        names = {}
         try:
             krx_df = fdr.StockListing('KRX')
             krx_df = krx_df.dropna(subset=['Sector']).head(100)
-            stocks = {}
-            names = {}
             for _, row in krx_df.iterrows():
-                code = row['Code']
-                market_type = row['Market']
-                ticker_key = f"{code}.KQ" if 'KOSDAQ' in str(market_type) else f"{code}.KS"
+                code = str(row['Code']).zfill(6)
+                market_type = str(row['Market'])
+                ticker_key = f"{code}.KQ" if 'KOSDAQ' in market_type else f"{code}.KS"
                 stocks[ticker_key] = row['Sector']
                 names[ticker_key] = row['Name']
             benchmark_ticker = '^KS11'
         except Exception as e:
-            log_warn(f"KRX 데이터 수집 실패: {e}. 우량주 20개로 대체합니다.")
-            stocks = {
-                '005930.KS': 'Technology', '000660.KS': 'Technology', '373220.KS': 'Technology',
-                '207940.KS': 'Health Care', '005380.KS': 'Consumer Durables', '000270.KS': 'Consumer Durables',
-                '068270.KS': 'Health Care', '051910.KS': 'Basic Materials', '035420.KS': 'Technology',
-                '006400.KS': 'Technology', '105560.KS': 'Financials', '055550.KS': 'Financials',
-                '028260.KS': 'Financials', '012330.KS': 'Industrials', '066570.KS': 'Consumer Durables',
-                '032830.KS': 'Financials', '003670.KS': 'Technology', '033780.KS': 'Technology',
-                '011200.KS': 'Industrials', '035720.KS': 'Technology'
-            }
-            names = {
-                '005930.KS': '삼성전자', '000660.KS': 'SK하이닉스', '373220.KS': 'LG에너지솔루션',
-                '207940.KS': '삼성바이오로직스', '005380.KS': '현대차', '000270.KS': '기아',
-                '068270.KS': '셀트리온', '051910.KS': 'LG화학', '035420.KS': 'NAVER',
-                '006400.KS': '삼성SDI', '105560.KS': 'KB금융', '055550.KS': '신한지주',
-                '028260.KS': '삼성물산', '012330.KS': '현대모비스', '066570.KS': 'LG전자',
-                '032830.KS': '삼성생명', '003670.KS': '포스코퓨처엠', '033780.KS': 'KT&G',
-                '011200.KS': 'HMM', '035720.KS': '카카오'
-            }
+            log_warn(f"KRX 동적 상장 목록 조회 예외 발생 ({e}). 한국 대표 우량주 Top 100 풀로 자동 전환합니다.")
+            top100_krx_data = [
+                ('005930.KS', '삼성전자', 'Technology'), ('000660.KS', 'SK하이닉스', 'Technology'),
+                ('373220.KS', 'LG에너지솔루션', 'Technology'), ('207940.KS', '삼성바이오로직스', 'Health Care'),
+                ('005380.KS', '현대차', 'Consumer Durables'), ('000270.KS', '기아', 'Consumer Durables'),
+                ('068270.KS', '셀트리온', 'Health Care'), ('051910.KS', 'LG화학', 'Basic Materials'),
+                ('035420.KS', 'NAVER', 'Technology'), ('006400.KS', '삼성SDI', 'Technology'),
+                ('105560.KS', 'KB금융', 'Financials'), ('055550.KS', '신한지주', 'Financials'),
+                ('028260.KS', '삼성물산', 'Financials'), ('012330.KS', '현대모비스', 'Industrials'),
+                ('066570.KS', 'LG전자', 'Consumer Durables'), ('032830.KS', '삼성생명', 'Financials'),
+                ('003670.KS', '포스코퓨처엠', 'Technology'), ('033780.KS', 'KT&G', 'Consumer Goods'),
+                ('011200.KS', 'HMM', 'Industrials'), ('035720.KS', '카카오', 'Technology'),
+                ('005490.KS', 'POSCO홀딩스', 'Basic Materials'), ('086520.KQ', '에코프로', 'Technology'),
+                ('247540.KQ', '에코프로비엠', 'Technology'), ('196170.KQ', '알테오젠', 'Health Care'),
+                ('000810.KS', '삼성화재', 'Financials'), ('015760.KS', '한국전력', 'Utilities'),
+                ('010140.KS', '삼성중공업', 'Industrials'), ('329180.KS', 'HD현대중공업', 'Industrials'),
+                ('012450.KS', '한화에어로스페이스', 'Industrials'), ('034730.KS', 'SK', 'Financials'),
+                ('003550.KS', 'LG', 'Financials'), ('018260.KS', '삼성SDS', 'Technology'),
+                ('032640.KS', 'LG유플러스', 'Telecommunications'), ('017670.KS', 'SK텔레콤', 'Telecommunications'),
+                ('030200.KS', 'KT', 'Telecommunications'), ('009150.KS', '삼성전기', 'Technology'),
+                ('010950.KS', 'S-Oil', 'Energy'), ('096770.KS', 'SK이노베이션', 'Energy'),
+                ('034020.KS', '두산에너빌리티', 'Industrials'), ('010130.KS', '고려아연', 'Basic Materials'),
+                ('001040.KS', 'CJ', 'Financials'), ('004020.KS', '현대제철', 'Basic Materials'),
+                ('000150.KS', '두산', 'Industrials'), ('024110.KS', '기업은행', 'Financials'),
+                ('316140.KS', '우리금융지주', 'Financials'), ('086790.KS', '하나금융지주', 'Financials'),
+                ('138040.KS', '메리츠금융지주', 'Financials'), ('009540.KS', 'HD한국조선해양', 'Industrials'),
+                ('267250.KS', 'HD현대일렉트릭', 'Industrials'), ('009830.KS', '한화솔루션', 'Basic Materials'),
+                ('011170.KS', '롯데케미칼', 'Basic Materials'), ('051900.KS', 'LG생활건강', 'Consumer Goods'),
+                ('090430.KS', '아모레퍼시픽', 'Consumer Goods'), ('036570.KS', '엔씨소프트', 'Technology'),
+                ('259960.KS', '크래프톤', 'Technology'), ('352820.KS', '하이브', 'Consumer Goods'),
+                ('035900.KQ', 'JYP Ent.', 'Consumer Goods'), ('122870.KQ', 'YG엔터테인먼트', 'Consumer Goods'),
+                ('041510.KQ', 'SM', 'Consumer Goods'), ('263750.KQ', '펄어비스', 'Technology'),
+                ('293490.KQ', '카카오게임즈', 'Technology'), ('066970.KQ', '엘앤에프', 'Technology'),
+                ('278280.KQ', '천보', 'Technology'), ('091990.KQ', '셀트리온제약', 'Health Care'),
+                ('145020.KQ', '휴젤', 'Health Care'), ('214150.KQ', '클래시스', 'Health Care'),
+                ('028300.KQ', 'HLB', 'Health Care'), ('086900.KQ', '메디톡스', 'Health Care'),
+                ('084370.KQ', '유진테크', 'Technology'), ('036930.KQ', '주성엔지니어링', 'Technology'),
+                ('039030.KQ', '이오테크닉스', 'Technology'), ('058470.KQ', '리노공업', 'Technology'),
+                ('042700.KQ', '한미반도체', 'Technology'), ('042660.KS', '한화오션', 'Industrials'),
+                ('004990.KS', '롯데지주', 'Financials'), ('002790.KS', '아모레G', 'Consumer Goods'),
+                ('006800.KS', '미래에셋증권', 'Financials'), ('005940.KS', 'NH투자증권', 'Financials'),
+                ('000720.KS', '현대건설', 'Industrials'), ('006360.KS', 'GS건설', 'Industrials'),
+                ('000880.KS', '한화', 'Financials'), ('078930.KS', 'GS', 'Financials'),
+                ('001740.KS', 'SK네트웍스', 'Financials'), ('000120.KS', 'CJ대한통운', 'Industrials'),
+                ('001450.KS', '현대해상', 'Financials'), ('005830.KS', 'DB손해보험', 'Financials'),
+                ('000100.KS', '유한양행', 'Health Care'), ('128940.KS', '한미약품', 'Health Care'),
+                ('185750.KS', '종근당', 'Health Care'), ('006280.KS', '녹십자', 'Health Care')
+            ]
+            stocks = {t: ind for t, n, ind in top100_krx_data}
+            names = {t: n for t, n, ind in top100_krx_data}
             benchmark_ticker = '^KS11'
     else:
         stocks = {}
@@ -901,14 +932,16 @@ if __name__ == "__main__":
     toss_base_url = os.environ.get("TOSS_BASE_URL", "https://openapi.tossinvest.com")
     
     toss_client = None
-    if toss_client_id and toss_client_secret and toss_client_id != "your_client_id_here":
+    if toss_client_id and toss_client_secret and toss_client_id not in ["your_client_id_here", ""]:
         try:
             from toss_api import TossinvestClient
             toss_client = TossinvestClient(toss_client_id, toss_client_secret, toss_base_url)
-            log_success("토스증권 API 인증 정보 로드 완료! (자동 연동 시작)")
+            log_success("토스증권 API 연동 모듈 로드 완료! (실거래 모드)")
         except Exception as e:
-            log_error(f"토스증권 API 연동 모듈 초기화 실패: {e}")
+            log_info("토스증권 API 미연동 ➔ 노션 시뮬레이터 모드로 전환합니다.")
             toss_client = None
+    else:
+        log_info("토스증권 API 키 미설정 ➔ 노션 대시보드 연동 시뮬레이터 모드로 작동합니다.")
             
     rates, sp500, vix, kospi = fetch_market_data()
     
@@ -1799,7 +1832,7 @@ if __name__ == "__main__":
                             
                     if ('alpha_results_kr' in globals() or 'alpha_results_kr' in locals()) and not alpha_results_kr.empty:
                         krx_sorted = alpha_results_kr.sort_values(by="Pure_Alpha(%)", ascending=False)
-                        for idx, (ticker, row) in enumerate(krx_sorted.head(20).iterrows()):
+                        for idx, (ticker, row) in enumerate(krx_sorted.head(50).iterrows()):
                             rankings_list.append({
                                 "name": str(row.get("Name", ticker)),
                                 "symbol": str(ticker),
