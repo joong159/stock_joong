@@ -2,6 +2,7 @@ import FinanceDataReader as fdr
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import datetime
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 from alpha_library import AlphaFactory
