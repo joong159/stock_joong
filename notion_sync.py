@@ -674,45 +674,58 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
         ensure_recommend_db_properties(db_id)
         today_str = get_kst_now().strftime("%Y-%m-%d")
         
-        # 1. 기존 노션 추천 포트폴리오 항목 조회 (어제 데이터는 캘린더용으로 보존하고, 오늘 항목만 덮어쓰기 위해 아카이브)
+        # 1. 기존 노션 추천 포트폴리오 항목 조회 (최근순으로 정렬하여 정확히 직전일 데이터 추출)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
-        res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
+        query_payload = {
+            "sorts": [
+                {
+                    "property": "Date",
+                    "direction": "descending"
+                }
+            ],
+            "page_size": 100
+        }
+        res = requests.post(query_url, headers=HEADERS, json=query_payload, timeout=10)
         
         prev_weights = {} # {ticker: weight_pct}
         if res.status_code == 200:
             results = res.json().get("results", [])
+            
+            # 먼저 가장 최근에 기록된 이전 날짜(target_prev_date)를 식별합니다.
+            target_prev_date = None
+            for page in results:
+                props = page.get("properties", {})
+                date_prop = props.get("Date", {}).get("date", {})
+                page_date = date_prop.get("start", "") if date_prop else ""
+                if page_date and page_date != today_str:
+                    target_prev_date = page_date
+                    break
+            
+            # 이제 그 직전 날짜(target_prev_date)에 해당하는 종목들의 비중만 수집합니다.
             for page in results:
                 page_id = page.get("id")
                 props = page.get("properties", {})
-                
-                # 날짜 추출
                 date_prop = props.get("Date", {}).get("date", {})
                 page_date = date_prop.get("start", "") if date_prop else ""
                 
-                # Symbol 추출
-                symbol_prop = props.get("Symbol", {}).get("rich_text", [])
-                symbol_txt = "".join([t.get("plain_text", "") for t in symbol_prop]).strip()
-                
-                if not symbol_txt:
-                    if page_date == today_str:
-                        requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
-                    continue
-                
-                # 티커 추출 (예: "🇺🇸 AAPL" -> "AAPL", "005930.KS" -> "005930.KS")
-                import re
-                match = re.search(r'([A-Za-z0-9\.\-]+)$', symbol_txt)
-                ticker = match.group(1).strip() if match else symbol_txt
-                
-                # 비중 수치 추출
-                weight_num = props.get("Weight (%)", {}).get("number", None)
-                if weight_num is not None:
-                    weight_pct = weight_num * 100.0 if weight_num <= 1.0 else weight_num
-                    prev_weights[ticker] = weight_pct
-                
                 # 오늘 이미 등록된 페이지라면 중복 방지를 위해 아카이브(삭제) 처리
-                # 과거 날짜 페이지는 아카이브하지 않고 캘린더 기록용으로 보존합니다!
                 if page_date == today_str:
                     requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                    continue
+                    
+                # 직전 날짜의 종목 비중만 수집
+                if target_prev_date and page_date == target_prev_date:
+                    symbol_prop = props.get("Symbol", {}).get("rich_text", [])
+                    symbol_txt = "".join([t.get("plain_text", "") for t in symbol_prop]).strip()
+                    if symbol_txt:
+                        import re
+                        match = re.search(r'([A-Za-z0-9\.\-]+)$', symbol_txt)
+                        ticker = match.group(1).strip() if match else symbol_txt
+                        
+                        weight_num = props.get("Weight (%)", {}).get("number", None)
+                        if weight_num is not None:
+                            weight_pct = weight_num * 100.0 if weight_num <= 1.0 else weight_num
+                            prev_weights[ticker] = weight_pct
                 
         # 2. 신규 추천 항목 생성 (국장 🇰🇷 우선 정렬 후 미장 🇺🇸 정렬)
         portfolio_list_sorted = sorted(portfolio_list, key=lambda x: 0 if x.get("market") in ["KRX", "KR"] else 1)
