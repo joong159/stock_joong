@@ -753,20 +753,29 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             company_name = get_korean_company_name(sym)
             clean_name = company_name if company_name != sym else name
             
-            # 전날 비중 대조하여 전일 대비 변동 계산
+            # 전일 대비 주가 등락률 표시 (price_change가 제공된 경우 주가 변동률, 없을 경우 비중 변동)
             prev_w = prev_weights.get(sym, None)
-            if prev_w is None:
-                action = "BUY"
-                diff_str = "🆕 신규 편입"
-            else:
-                action = "HOLD"
-                diff = weight - prev_w
-                if abs(diff) < 0.01:
-                    diff_str = "➖ 변동 없음"
-                elif diff > 0:
-                    diff_str = f"🔺 +{diff:.2f}%p"
+            action = item.get("action", "BUY" if prev_w is None else "HOLD")
+            
+            pc = item.get("price_change", None)
+            if pc is not None:
+                if pc > 0:
+                    diff_str = f"🔺 +{pc:.2f}%"
+                elif pc < 0:
+                    diff_str = f"🔻 {pc:.2f}%"
                 else:
-                    diff_str = f"🔻 {diff:.2f}%p"
+                    diff_str = "➖ 0.00%"
+            else:
+                if prev_w is None:
+                    diff_str = "🆕 신규 편입"
+                else:
+                    diff = weight - prev_w
+                    if abs(diff) < 0.01:
+                        diff_str = "➖ 변동 없음"
+                    elif diff > 0:
+                        diff_str = f"🔺 +{diff:.2f}%p"
+                    else:
+                        diff_str = f"🔻 {diff:.2f}%p"
             
             currency = "KRW" if is_krx else "USD"
             score_str = f"{score:+.2f}"

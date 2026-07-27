@@ -1673,15 +1673,36 @@ if __name__ == "__main__":
                     recommend_list = []
                     # 현재 보유 중인 종목 기호 세트 (quantity > 0)
                     owned_symbols = {h["symbol"] for h in toss_holdings if float(h.get("quantity", 0.0)) > 0}
-                    # 최종 추천 종목의 실시간 현재가 개별 조회
+                    # 최종 추천 종목의 실시간 현재가 및 전일 대비 변동 개별 조회
                     target_tickers = list(final_portfolio.index)
                     prices_map = {}
+                    price_changes_map = {}
                     for t in target_tickers:
                         try:
-                            t_df = yf.download(t, period='1d', progress=False)
-                            prices_map[t] = get_safe_close_price(t_df)
+                            t_df = yf.download(t, period='5d', progress=False)
+                            curr_price = get_safe_close_price(t_df)
+                            prices_map[t] = curr_price
+                            # 전일 종가 대비 등락률 계산
+                            if len(t_df) >= 2:
+                                close_col = t_df.get('Close')
+                                if close_col is not None:
+                                    if isinstance(close_col, pd.DataFrame):
+                                        prev_close = float(close_col.iloc[-2, 0])
+                                    elif isinstance(close_col, pd.Series):
+                                        prev_close = float(close_col.iloc[-2])
+                                    else:
+                                        prev_close = curr_price
+                                    if prev_close > 0:
+                                        price_changes_map[t] = ((curr_price - prev_close) / prev_close) * 100
+                                    else:
+                                        price_changes_map[t] = 0.0
+                                else:
+                                    price_changes_map[t] = 0.0
+                            else:
+                                price_changes_map[t] = 0.0
                         except Exception:
                             prices_map[t] = 0.0
+                            price_changes_map[t] = 0.0
 
                     for ticker, row in final_portfolio.iterrows():
                         t_sym = get_toss_symbol(ticker)
@@ -1709,6 +1730,7 @@ if __name__ == "__main__":
                             "weight": float(row.get("Weight(%)", 0.0)),
                             "amount": float(row.get("Invest_Amount(KRW)", 0.0)),
                             "price": price_str,
+                            "price_change": price_changes_map.get(ticker, 0.0),
                             "action": action
                         })
                         
