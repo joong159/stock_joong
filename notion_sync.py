@@ -2,6 +2,13 @@ import os
 import requests
 import datetime
 
+def get_kst_now():
+    """
+    GMT/UTC 시간대 환경(예: GitHub Actions)에서도 항상 정확한 한국 표준시(KST, UTC+9)를 반환합니다.
+    """
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    return (utc_now + datetime.timedelta(hours=9)).replace(tzinfo=None)
+
 # .env 파일 파싱 헬퍼 (의존성 최소화)
 def load_dotenv(dotenv_path=".env"):
     if os.path.exists(dotenv_path):
@@ -316,7 +323,7 @@ def update_notion_kpi_card(total_assets, cash_balance, stock_valuation, usd_krw,
             f"• 주식 평가액 (STOCKS): ₩ {stock_valuation:,.0f}\n"
             f"• 포트폴리오 평가 손익: ₩ {total_pl:+,.0f} ({pl_rate:+.2f}%)\n"
             f"• 기준 고시 환율 (USD/KRW): ₩ {usd_krw:,.2f}\n"
-            f"• 마지막 대시보드 갱신 시간: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            f"• 마지막 대시보드 갱신 시간: {get_kst_now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
         
         if kpi_block_id:
@@ -519,7 +526,7 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
         res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
         
-        now = datetime.datetime.now()
+        now = get_kst_now()
         if res.status_code == 200:
             results = res.json().get("results", [])
             for page in results:
@@ -562,9 +569,9 @@ def sync_market_news_to_notion(news_list, fast_translate=False):
                     dt = datetime.datetime.fromtimestamp(pub_time)
                     date_str = dt.isoformat()
                 except Exception:
-                    date_str = datetime.datetime.now().isoformat()
+                    date_str = get_kst_now().isoformat()
             else:
-                date_str = datetime.datetime.now().isoformat()
+                date_str = get_kst_now().isoformat()
                 
             raw_title = art.get("title", "뉴스 헤드라인")
             korean_title = translate_headline_to_korean(raw_title, fast=fast_translate)
@@ -665,7 +672,7 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
     try:
         # 데이터베이스 속성(스키마) 유효성 보장 및 보강
         ensure_recommend_db_properties(db_id)
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_str = get_kst_now().strftime("%Y-%m-%d")
         
         # 1. 기존 노션 추천 포트폴리오 항목 조회 (어제 데이터는 캘린더용으로 보존하고, 오늘 항목만 덮어쓰기 위해 아카이브)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -815,7 +822,7 @@ def sync_rankings_to_notion(rankings_list):
         ensure_ranking_db_properties(db_kr_id)
         ensure_ranking_db_properties(db_us_id)
         
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_str = get_kst_now().strftime("%Y-%m-%d")
         
         # 국장 및 미장 아이템 분류
         kr_items = [item for item in rankings_list if item.get("market") == "KRX"]
@@ -917,7 +924,7 @@ def log_trade_to_notion(symbol, name, side, qty, price, val_krw, reason=""):
         return
         
     try:
-        now_str = datetime.datetime.now().isoformat()
+        now_str = get_kst_now().isoformat()
         title = f"{name} { '매수' if side == 'BUY' else '매도'}"
         
         properties = {
@@ -1237,7 +1244,7 @@ def sync_sell_signals_to_notion(sell_list):
             return
             
     try:
-        today_str = datetime.datetime.now().strftime("%Y-%m-%d")
+        today_str = get_kst_now().strftime("%Y-%m-%d")
         
         # 1. 오늘 날짜로 이미 동기화된 매도 시그널 항목 아카이브 (중복 방지)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -1536,7 +1543,7 @@ def calculate_portfolio_returns():
         if not all_tickers:
             all_tickers = ['AAPL', 'MSFT', 'CVX', '005930.KS', '000660.KS', '000270.KS', '055550.KS', '011200.KS', '105560.KS', '033780.KS']
             
-        now = datetime.datetime.now()
+        now = get_kst_now()
         df_prices = yf.download(all_tickers, period='60d', progress=False)
         close_df = df_prices['Close'] if 'Close' in df_prices.columns else df_prices
         
@@ -1717,7 +1724,7 @@ def update_notion_regime_style(regime_val):
         w_str = f"+{w_ret:.2f}% 🔺" if w_ret > 0 else (f"{w_ret:.2f}% 🔻" if w_ret < 0 else "0.00% ➖")
         m_str = f"+{m_ret:.2f}% 🔺" if m_ret > 0 else (f"{m_ret:.2f}% 🔻" if m_ret < 0 else "0.00% ➖")
 
-        now_m = datetime.datetime.now().month
+        now_m = get_kst_now().month
         regime_text = (
             f"📊 퀀트 추천 포트폴리오 수익률 성과 현황 (월요일 매수 가정)\n"
             f"• 🗓️ 주간 수익률 (이번 주 월요일 매수 시): {w_str}\n"

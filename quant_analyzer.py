@@ -73,6 +73,14 @@ def load_dotenv(dotenv_path=".env"):
         except Exception as e:
             log_warn(f".env 파일을 읽는 중 오류가 발생했습니다: {e}")
 
+def get_kst_now():
+    """
+    GMT/UTC 시간대 환경(예: GitHub Actions)에서도 항상 정확한 한국 표준시(KST, UTC+9)를 반환합니다.
+    """
+    import datetime
+    utc_now = datetime.datetime.now(datetime.timezone.utc)
+    return (utc_now + datetime.timedelta(hours=9)).replace(tzinfo=None)
+
 CACHE_FILE = '.financials_cache.json'
 cache_lock = threading.Lock()
 
@@ -876,8 +884,7 @@ def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None,
         return False, 0.0
 
 def is_us_market_open():
-    import datetime
-    now = datetime.datetime.now() # KST
+    now = get_kst_now() # KST
     weekday = now.weekday()
     if weekday == 5 and now.hour >= 6:
         return False
@@ -896,8 +903,7 @@ def is_us_market_open():
     return False
 
 def is_kr_market_open():
-    import datetime
-    now = datetime.datetime.now()
+    now = get_kst_now()
     weekday = now.weekday()
     if weekday >= 5:
         return False
@@ -1299,7 +1305,7 @@ if __name__ == "__main__":
                 log_info(f"  * 국내 주식 (KRW): 예수금 {cash_balance_krw:,.0f}원 | 주식 {current_kr_value_krw:,.0f}원 | 총자산 {total_kr_assets_krw:,.0f}원 (종목당 목표 {target_val_per_stock_krw:,.0f}원)")
                 
                 # 2단계: 신규 매수 편입 종목 선정 (주간 리밸런싱 - 월요일 또는 테스트/강제 매수 시만 집행)
-                is_rebalance_day = (datetime.datetime.now().weekday() == 0) or args_cli.test or getattr(args_cli, 'force', False)
+                is_rebalance_day = (get_kst_now().weekday() == 0) or args_cli.test or getattr(args_cli, 'force', False)
                 
                 if is_rebalance_day:
                     if not is_us_winter:
