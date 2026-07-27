@@ -1673,7 +1673,23 @@ if __name__ == "__main__":
                     recommend_list = []
                     # 현재 보유 중인 종목 기호 세트 (quantity > 0)
                     owned_symbols = {h["symbol"] for h in toss_holdings if float(h.get("quantity", 0.0)) > 0}
-                    
+                    # 최종 추천 종목의 실시간 현재가 일괄 조회
+                    target_tickers = list(final_portfolio.index)
+                    prices_map = {}
+                    try:
+                        prices_df = yf.download(target_tickers, period='1d', progress=False)
+                        for t in target_tickers:
+                            try:
+                                if len(target_tickers) == 1:
+                                    t_df = prices_df
+                                else:
+                                    t_df = prices_df[t] if t in prices_df.columns.levels[1] else prices_df
+                                prices_map[t] = get_safe_close_price(t_df)
+                            except Exception:
+                                prices_map[t] = 0.0
+                    except Exception:
+                        pass
+
                     for ticker, row in final_portfolio.iterrows():
                         t_sym = get_toss_symbol(ticker)
                         # 보유 중이면 HOLD, 미보유 중이면 BUY가 기본값
@@ -1684,6 +1700,13 @@ if __name__ == "__main__":
                                     action = "HOLD" if rebal["Action"] == "KEEP" else rebal["Action"]
                                 break
                                 
+                        price_original = prices_map.get(ticker, 0.0)
+                        is_us = not (ticker.endswith('.KS') or ticker.endswith('.KQ'))
+                        if is_us:
+                            price_str = f"$ {price_original:,.2f}"
+                        else:
+                            price_str = f"₩ {price_original:,.0f}"
+
                         recommend_list.append({
                             "symbol": str(ticker),
                             "name": str(row.get("Name", "")),
@@ -1692,6 +1715,7 @@ if __name__ == "__main__":
                             "score": float(row.get("AI_News_Score", 0.0)),
                             "weight": float(row.get("Weight(%)", 0.0)),
                             "amount": float(row.get("Invest_Amount(KRW)", 0.0)),
+                            "price": price_str,
                             "action": action
                         })
                         

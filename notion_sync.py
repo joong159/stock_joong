@@ -644,6 +644,9 @@ def ensure_recommend_db_properties(db_id):
             "전일 대비": {
                 "rich_text": {}
             },
+            "Price": {
+                "rich_text": {}
+            },
             "Date": {
                 "date": {}
             }
@@ -787,6 +790,7 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                     "Weight (%)": {"number": weight_val},
                     "보유금 대비 비중 (%)": {"number": weight_val},
                     "전일 대비": {"rich_text": [{"text": {"content": diff_str}}]},
+                    "Price": {"rich_text": [{"text": {"content": item.get("price", "N/A")}}]},
                     "Date": {"date": {"start": today_str}}
                 }
             }
