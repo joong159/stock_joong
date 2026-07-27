@@ -820,6 +820,12 @@ def ensure_ranking_db_properties(db_id):
         "properties": {
             "Date": {
                 "date": {}
+            },
+            "Price": {
+                "rich_text": {}
+            },
+            "전일 대비": {
+                "rich_text": {}
             }
         }
     }
