@@ -44,13 +44,13 @@
     "055550.KS": {
         "purchase_date": "2026-07-21 11:47:01",
         "purchase_price": 103300.0,
-        "highest_price": 103500.0,
+        "highest_price": 104100.0,
         "purchase_qty": 1.0
     },
     "105560.KS": {
         "purchase_date": "2026-07-21 11:47:01",
         "purchase_price": 169200.0,
-        "highest_price": 169900.0,
+        "highest_price": 171100.0,
         "purchase_qty": 1.0
     },
     "033780.KS": {
@@ -86,13 +86,13 @@
     "005830.KS": {
         "purchase_date": "2026-07-21 11:47:01",
         "purchase_price": 163600.0,
-        "highest_price": 164300.0,
+        "highest_price": 164400.0,
         "purchase_qty": 1.0
     },
     "259960.KS": {
         "purchase_date": "2026-07-21 11:47:01",
         "purchase_price": 239000.0,
-        "highest_price": 246500.0,
+        "highest_price": 248000.0,
         "purchase_qty": 1.0
     },
     "011200.KS": {
@@ -119,12 +119,6 @@
         "highest_price": 302.5,
         "purchase_qty": 1.0
     },
-    "CSX": {
-        "purchase_date": "2026-07-27 01:43:50",
-        "purchase_price": 53.22999954223633,
-        "highest_price": 53.22999954223633,
-        "purchase_qty": 1.0
-    },
     "ADM": {
         "purchase_date": "2026-07-27 01:43:50",
         "purchase_price": 85.91999816894531,
@@ -146,19 +140,13 @@
     "018260.KS": {
         "purchase_date": "2026-07-27 01:43:50",
         "purchase_price": 219000.0,
-        "highest_price": 219000.0,
-        "purchase_qty": 1.0
-    },
-    "138040.KS": {
-        "purchase_date": "2026-07-27 01:43:50",
-        "purchase_price": 125300.0,
-        "highest_price": 125300.0,
+        "highest_price": 220000.0,
         "purchase_qty": 1.0
     },
     "035420.KS": {
         "purchase_date": "2026-07-27 01:43:50",
         "purchase_price": 223500.0,
-        "highest_price": 223500.0,
+        "highest_price": 225250.0,
         "purchase_qty": 1.0
     },
     "078930.KS": {
@@ -206,7 +194,7 @@
     "035720.KS": {
         "purchase_date": "2026-07-27 01:43:50",
         "purchase_price": 36300.0,
-        "highest_price": 36300.0,
+        "highest_price": 36550.0,
         "purchase_qty": 1.0
     },
     "BBY": {
@@ -231,6 +219,18 @@
         "purchase_date": "2026-07-27 01:43:50",
         "purchase_price": 172.6199951171875,
         "highest_price": 172.6199951171875,
+        "purchase_qty": 1.0
+    },
+    "IP": {
+        "purchase_date": "2026-07-27 04:15:11",
+        "purchase_price": 42.15999984741211,
+        "highest_price": 42.15999984741211,
+        "purchase_qty": 1.0
+    },
+    "VRSN": {
+        "purchase_date": "2026-07-27 04:15:11",
+        "purchase_price": 280.0,
+        "highest_price": 280.0,
         "purchase_qty": 1.0
     }
 }
