@@ -1673,22 +1673,15 @@ if __name__ == "__main__":
                     recommend_list = []
                     # 현재 보유 중인 종목 기호 세트 (quantity > 0)
                     owned_symbols = {h["symbol"] for h in toss_holdings if float(h.get("quantity", 0.0)) > 0}
-                    # 최종 추천 종목의 실시간 현재가 일괄 조회
+                    # 최종 추천 종목의 실시간 현재가 개별 조회
                     target_tickers = list(final_portfolio.index)
                     prices_map = {}
-                    try:
-                        prices_df = yf.download(target_tickers, period='1d', progress=False)
-                        for t in target_tickers:
-                            try:
-                                if len(target_tickers) == 1:
-                                    t_df = prices_df
-                                else:
-                                    t_df = prices_df[t] if t in prices_df.columns.levels[1] else prices_df
-                                prices_map[t] = get_safe_close_price(t_df)
-                            except Exception:
-                                prices_map[t] = 0.0
-                    except Exception:
-                        pass
+                    for t in target_tickers:
+                        try:
+                            t_df = yf.download(t, period='1d', progress=False)
+                            prices_map[t] = get_safe_close_price(t_df)
+                        except Exception:
+                            prices_map[t] = 0.0
 
                     for ticker, row in final_portfolio.iterrows():
                         t_sym = get_toss_symbol(ticker)
