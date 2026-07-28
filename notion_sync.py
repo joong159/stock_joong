@@ -675,7 +675,8 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
     try:
         # 데이터베이스 속성(스키마) 유효성 보장 및 보강
         ensure_recommend_db_properties(db_id)
-        today_str = get_kst_now().strftime("%Y-%m-%d")
+        today_date_str = get_kst_now().strftime("%Y-%m-%d")
+        today_iso_str = get_kst_now().strftime("%Y-%m-%dT%H:%M:%S+09:00")
         
         # 1. 기존 노션 추천 포트폴리오 항목 조회 (최근순으로 정렬하여 정확히 직전일 데이터 추출)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -700,8 +701,8 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                 props = page.get("properties", {})
                 date_prop = props.get("Date", {}).get("date", {})
                 page_date = date_prop.get("start", "") if date_prop else ""
-                if page_date and page_date != today_str:
-                    target_prev_date = page_date
+                if page_date and not page_date.startswith(today_date_str):
+                    target_prev_date = page_date[:10]
                     break
             
             # 이제 그 직전 날짜(target_prev_date)에 해당하는 종목들의 비중만 수집합니다.
@@ -712,12 +713,12 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                 page_date = date_prop.get("start", "") if date_prop else ""
                 
                 # 오늘 이미 등록된 페이지라면 중복 방지를 위해 아카이브(삭제) 처리
-                if page_date == today_str:
+                if page_date.startswith(today_date_str):
                     requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                     continue
                     
                 # 직전 날짜의 종목 비중만 수집
-                if target_prev_date and page_date == target_prev_date:
+                if target_prev_date and page_date.startswith(target_prev_date):
                     symbol_prop = props.get("Symbol", {}).get("rich_text", [])
                     symbol_txt = "".join([t.get("plain_text", "") for t in symbol_prop]).strip()
                     if symbol_txt:
@@ -800,7 +801,7 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                     "보유금 대비 비중 (%)": {"number": weight_val},
                     "전일 대비": {"rich_text": [{"text": {"content": diff_str}}]},
                     "Price": {"rich_text": [{"text": {"content": item.get("price", "N/A")}}]},
-                    "Date": {"date": {"start": today_str}}
+                    "Date": {"date": {"start": today_iso_str}}
                 }
             }
             res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
@@ -854,7 +855,8 @@ def sync_rankings_to_notion(rankings_list):
         ensure_ranking_db_properties(db_kr_id)
         ensure_ranking_db_properties(db_us_id)
         
-        today_str = get_kst_now().strftime("%Y-%m-%d")
+        today_date_str = get_kst_now().strftime("%Y-%m-%d")
+        today_iso_str = get_kst_now().strftime("%Y-%m-%dT%H:%M:%S+09:00")
         
         # 국장 및 미장 아이템 분류
         kr_items = [item for item in rankings_list if item.get("market") == "KRX"]
@@ -863,21 +865,15 @@ def sync_rankings_to_notion(rankings_list):
         # 1. 오늘 날짜로 이미 동기화된 항목이 있다면 중복 제거를 위해 아카이브 처리
         for db_id in [db_kr_id, db_us_id]:
             query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
-            filter_payload = {
-                "filter": {
-                    "property": "Date",
-                    "date": {
-                        "equals": today_str
-                    }
-                },
-                "page_size": 100
-            }
-            res = requests.post(query_url, headers=HEADERS, json=filter_payload, timeout=10)
+            res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
             if res.status_code == 200:
                 results = res.json().get("results", [])
                 for page in results:
                     page_id = page.get("id")
-                    requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
+                    date_prop = page.get("properties", {}).get("Date", {}).get("date", {})
+                    p_date = date_prop.get("start", "") if date_prop else ""
+                    if p_date.startswith(today_date_str):
+                        requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                     
         # 2. 국장 신규 랭킹 생성 (오늘 날짜 부여)
         # 순위가 정돈되어 들어가도록 Rank 역순(20위부터 1위)으로 생성하여 노션 디폴트 정렬 시 1위가 맨 위로 오도록 함
@@ -893,6 +889,9 @@ def sync_rankings_to_notion(rankings_list):
             clean_name = company_name if company_name != sym else name
             stock_display = f"🇰🇷 {sym}"
             
+            price_str = item.get("price", "N/A")
+            pc_str = item.get("price_change_str", "➖ 0.00%")
+            
             display_name = f"[{rank_val}위] {clean_name}"
             payload = {
                 "parent": {"database_id": db_kr_id},
@@ -902,7 +901,9 @@ def sync_rankings_to_notion(rankings_list):
                     "Rank": {"number": rank_val},
                     "Score": {"number": round(item.get("score", 0.0), 4)},
                     "Industry": {"rich_text": [{"text": {"content": item.get("industry", "")}}]},
-                    "Date": {"date": {"start": today_str}}
+                    "Price": {"rich_text": [{"text": {"content": price_str}}]},
+                    "전일 대비": {"rich_text": [{"text": {"content": pc_str}}]},
+                    "Date": {"date": {"start": today_iso_str}}
                 }
             }
             res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
@@ -923,6 +924,9 @@ def sync_rankings_to_notion(rankings_list):
             clean_name = company_name if company_name != sym else name
             stock_display = f"🇺🇸 {sym}"
             
+            price_str = item.get("price", "N/A")
+            pc_str = item.get("price_change_str", "➖ 0.00%")
+            
             display_name = f"[{rank_val}위] {clean_name}"
             payload = {
                 "parent": {"database_id": db_us_id},
@@ -932,7 +936,9 @@ def sync_rankings_to_notion(rankings_list):
                     "Rank": {"number": rank_val},
                     "Score": {"number": round(item.get("score", 0.0), 4)},
                     "Industry": {"rich_text": [{"text": {"content": item.get("industry", "")}}]},
-                    "Date": {"date": {"start": today_str}}
+                    "Price": {"rich_text": [{"text": {"content": price_str}}]},
+                    "전일 대비": {"rich_text": [{"text": {"content": pc_str}}]},
+                    "Date": {"date": {"start": today_iso_str}}
                 }
             }
             res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
@@ -1276,7 +1282,8 @@ def sync_sell_signals_to_notion(sell_list):
             return
             
     try:
-        today_str = get_kst_now().strftime("%Y-%m-%d")
+        today_date_str = get_kst_now().strftime("%Y-%m-%d")
+        today_iso_str = get_kst_now().strftime("%Y-%m-%dT%H:%M:%S+09:00")
         
         # 1. 오늘 날짜로 이미 동기화된 매도 시그널 항목 아카이브 (중복 방지)
         query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
@@ -1285,7 +1292,7 @@ def sync_sell_signals_to_notion(sell_list):
             for page in res.json().get("results", []):
                 date_prop = page.get("properties", {}).get("Date", {}).get("date", {})
                 page_date = date_prop.get("start", "") if date_prop else ""
-                if page_date == today_str:
+                if page_date.startswith(today_date_str):
                     requests.patch(f"https://api.notion.com/v1/pages/{page.get('id')}", headers=HEADERS, json={"archived": True}, timeout=10)
                     
         # 2. 오늘 매도 항목 생성
@@ -1302,6 +1309,9 @@ def sync_sell_signals_to_notion(sell_list):
                 flag = "🇺🇸" if mkt == "S&P500" else "🇰🇷"
                 stock_disp = f"{flag} {sym}"
                 
+                price_str = item.get("price", "N/A")
+                pc_str = item.get("price_change_str", "➖ 0.00%")
+                
                 payload = {
                     "parent": {"database_id": db_id},
                     "properties": {
@@ -1310,7 +1320,9 @@ def sync_sell_signals_to_notion(sell_list):
                         "Action": {"select": {"name": "SELL"}},
                         "Reason": {"rich_text": [{"text": {"content": reason}}]},
                         "Market": {"select": {"name": mkt}},
-                        "Date": {"date": {"start": today_str}}
+                        "Price": {"rich_text": [{"text": {"content": price_str}}]},
+                        "전일 대비": {"rich_text": [{"text": {"content": pc_str}}]},
+                        "Date": {"date": {"start": today_iso_str}}
                     }
                 }
                 requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
@@ -1326,7 +1338,7 @@ def sync_sell_signals_to_notion(sell_list):
                     "Action": {"select": {"name": "HOLD"}},
                     "Reason": {"rich_text": [{"text": {"content": "모든 보유 종목이 손절선 위에서 안정적으로 추세를 유지하고 있습니다."}}]},
                     "Market": {"select": {"name": "KRX"}},
-                    "Date": {"date": {"start": today_str}}
+                    "Date": {"date": {"start": today_iso_str}}
                 }
             }
             requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
