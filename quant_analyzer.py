@@ -2,6 +2,7 @@ import FinanceDataReader as fdr
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import math
 import datetime
 import nltk
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
@@ -815,25 +816,33 @@ def export_to_excel(output_filename, df_portfolio, df_alpha, df_market, df_dict,
 def get_safe_close_price(ticker_df):
     """
     yfinance 데이터프레임에서 종가(Close)를 판다스 버전 경고 없이 안전하게 추출합니다.
+    (결측치 NaN인 최신 행은 자동으로 제외하고 가장 최근의 유효한 종가를 반환합니다.)
     """
-    if ticker_df.empty:
+    if ticker_df is None or ticker_df.empty:
         return 0.0
     
-    # Close 컬럼 추출
-    close_col = ticker_df.get('Close')
-    if close_col is None:
-        close_col = ticker_df.iloc[:, -1] # 없으면 마지막 컬럼 사용
-        
-    if isinstance(close_col, pd.DataFrame):
-        val = close_col.iloc[-1, 0]
-    elif isinstance(close_col, pd.Series):
-        val = close_col.iloc[-1]
-    else:
-        val = close_col
-        
-    if isinstance(val, pd.Series):
-        return float(val.iloc[0])
-    return float(val)
+    try:
+        close_col = ticker_df.get('Close')
+        if close_col is None:
+            close_col = ticker_df.iloc[:, -1]
+            
+        if isinstance(close_col, pd.DataFrame):
+            close_series = close_col.iloc[:, 0]
+        elif isinstance(close_col, pd.Series):
+            close_series = close_col
+        else:
+            close_series = pd.Series([close_col])
+            
+        valid_series = close_series.dropna()
+        if valid_series.empty:
+            return 0.0
+            
+        val = float(valid_series.iloc[-1])
+        if pd.isna(val) or math.isnan(val):
+            return 0.0
+        return val
+    except Exception:
+        return 0.0
 
 def get_toss_symbol(target_ticker):
     """
@@ -1682,18 +1691,20 @@ if __name__ == "__main__":
                             t_df = yf.download(t, period='5d', progress=False)
                             curr_price = get_safe_close_price(t_df)
                             prices_map[t] = curr_price
-                            # 전일 종가 대비 등락률 계산
-                            if len(t_df) >= 2:
+                            # 전일 종가 대비 등락률 계산 (NaN 결측치 자동 제어)
+                            if t_df is not None and not t_df.empty:
                                 close_col = t_df.get('Close')
                                 if close_col is not None:
                                     if isinstance(close_col, pd.DataFrame):
-                                        prev_close = float(close_col.iloc[-2, 0])
-                                    elif isinstance(close_col, pd.Series):
-                                        prev_close = float(close_col.iloc[-2])
+                                        valid_c = close_col.iloc[:, 0].dropna()
                                     else:
-                                        prev_close = curr_price
-                                    if prev_close > 0:
-                                        price_changes_map[t] = ((curr_price - prev_close) / prev_close) * 100
+                                        valid_c = close_col.dropna()
+                                    if len(valid_c) >= 2:
+                                        prev_close = float(valid_c.iloc[-2])
+                                        if prev_close > 0 and curr_price > 0 and not pd.isna(prev_close) and not math.isnan(prev_close):
+                                            price_changes_map[t] = ((curr_price - prev_close) / prev_close) * 100.0
+                                        else:
+                                            price_changes_map[t] = 0.0
                                     else:
                                         price_changes_map[t] = 0.0
                                 else:
@@ -1715,6 +1726,8 @@ if __name__ == "__main__":
                                 break
                                 
                         price_original = prices_map.get(ticker, 0.0)
+                        if pd.isna(price_original) or math.isnan(price_original):
+                            price_original = 0.0
                         is_us = not (ticker.endswith('.KS') or ticker.endswith('.KQ'))
                         if is_us:
                             price_str = f"$ {price_original:,.2f}"
