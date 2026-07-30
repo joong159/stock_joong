@@ -2,7 +2,7 @@
     "XOM": {
         "purchase_date": "2026-07-21 11:47:01",
         "purchase_price": 148.36000061035156,
-        "highest_price": 156.94000244140625,
+        "highest_price": 156.97000122070312,
         "purchase_qty": 1.0
     },
     "BAC": {
@@ -68,7 +68,7 @@
     "259960.KS": {
         "purchase_date": "2026-07-21 11:47:01",
         "purchase_price": 239000.0,
-        "highest_price": 255500.0,
+        "highest_price": 259000.0,
         "purchase_qty": 1.0
     },
     "011200.KS": {
@@ -146,7 +146,7 @@
     "TMO": {
         "purchase_date": "2026-07-27 10:51:52",
         "purchase_price": 568.260009765625,
-        "highest_price": 576.4600219726562,
+        "highest_price": 576.77001953125,
         "purchase_qty": 1.0
     },
     "LMT": {
@@ -254,7 +254,7 @@
     "GRMN": {
         "purchase_date": "2026-07-30 00:59:39",
         "purchase_price": 294.8299865722656,
-        "highest_price": 294.8299865722656,
+        "highest_price": 297.54998779296875,
         "purchase_qty": 1.0
     },
     "CTSH": {
