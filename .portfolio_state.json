@@ -68,7 +68,7 @@
     "259960.KS": {
         "purchase_date": "2026-07-21 11:47:01",
         "purchase_price": 239000.0,
-        "highest_price": 252000.0,
+        "highest_price": 252500.0,
         "purchase_qty": 1.0
     },
     "011200.KS": {
@@ -218,7 +218,7 @@
     "138040.KS": {
         "purchase_date": "2026-07-29 01:27:18",
         "purchase_price": 122600.0,
-        "highest_price": 122600.0,
+        "highest_price": 124400.0,
         "purchase_qty": 1.0
     },
     "RTX": {
@@ -242,7 +242,25 @@
     "051900.KS": {
         "purchase_date": "2026-07-29 21:31:19",
         "purchase_price": 263000.0,
-        "highest_price": 263000.0,
+        "highest_price": 312500.0,
+        "purchase_qty": 1.0
+    },
+    "ACN": {
+        "purchase_date": "2026-07-30 00:59:39",
+        "purchase_price": 173.1699981689453,
+        "highest_price": 173.1699981689453,
+        "purchase_qty": 1.0
+    },
+    "GRMN": {
+        "purchase_date": "2026-07-30 00:59:39",
+        "purchase_price": 294.8299865722656,
+        "highest_price": 294.8299865722656,
+        "purchase_qty": 1.0
+    },
+    "CTSH": {
+        "purchase_date": "2026-07-30 00:59:39",
+        "purchase_price": 55.970001220703125,
+        "highest_price": 55.970001220703125,
         "purchase_qty": 1.0
     }
 }
