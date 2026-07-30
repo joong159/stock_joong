@@ -1753,23 +1753,47 @@ if __name__ == "__main__":
                         # 🚨 매도(SELL) 시그널 전용 데이터베이스 동기화
                         try:
                             from notion_sync import sync_sell_signals_to_notion
-                            sell_items = [
-                                {
-                                    "symbol": item["symbol"],
-                                    "name": item["name"],
-                                    "reason": "Chandelier Exit 손절선 이탈 또는 퀀트 랭킹 하락 교체",
-                                    "market": item["market"]
-                                }
-                                for item in recommend_list if item.get("action") == "SELL"
-                            ]
+                            sell_items = []
+                            for item in recommend_list:
+                                if item.get("action") == "SELL":
+                                    pc = item.get("price_change", 0.0)
+                                    if pc > 0:
+                                        pc_str = f"🔺 +{pc:.2f}%"
+                                    elif pc < 0:
+                                        pc_str = f"🔻 {pc:.2f}%"
+                                    else:
+                                        pc_str = "➖ 0.00%"
+                                    sell_items.append({
+                                        "symbol": item["symbol"],
+                                        "name": item["name"],
+                                        "reason": "Chandelier Exit 손절선 이탈 또는 퀀트 랭킹 하락 교체",
+                                        "market": item["market"],
+                                        "price": item.get("price", "N/A"),
+                                        "price_change_str": pc_str
+                                    })
                             for rebal in rebal_data:
                                 if rebal.get("Action") == "SELL":
                                     if not any(s["symbol"] == rebal["Toss_Symbol"] or s["symbol"] == rebal["Ticker"] for s in sell_items):
+                                        # rebal_data 매도 종목도 가격 조회
+                                        rebal_ticker = rebal.get("Ticker", rebal["Toss_Symbol"])
+                                        rebal_price_str = "N/A"
+                                        rebal_pc_str = "➖ 0.00%"
+                                        if rebal_ticker in prices_map:
+                                            rp = prices_map[rebal_ticker]
+                                            is_us_r = not (rebal_ticker.endswith('.KS') or rebal_ticker.endswith('.KQ'))
+                                            rebal_price_str = f"$ {rp:,.2f}" if is_us_r else f"₩ {rp:,.0f}"
+                                            rpc = price_changes_map.get(rebal_ticker, 0.0)
+                                            if rpc > 0:
+                                                rebal_pc_str = f"🔺 +{rpc:.2f}%"
+                                            elif rpc < 0:
+                                                rebal_pc_str = f"🔻 {rpc:.2f}%"
                                         sell_items.append({
                                             "symbol": rebal["Toss_Symbol"],
                                             "name": rebal["Name"],
                                             "reason": rebal.get("Reason", "매도 시그널 발생"),
-                                            "market": "KRX" if (rebal["Toss_Symbol"].endswith(".KS") or rebal["Toss_Symbol"].endswith(".KQ")) else "S&P500"
+                                            "market": "KRX" if (rebal["Toss_Symbol"].endswith(".KS") or rebal["Toss_Symbol"].endswith(".KQ")) else "S&P500",
+                                            "price": rebal_price_str,
+                                            "price_change_str": rebal_pc_str
                                         })
                             sync_sell_signals_to_notion(sell_items)
                         except Exception as ex_sell:
@@ -1778,16 +1802,56 @@ if __name__ == "__main__":
                     # 2. 국장/미장 종목 랭킹 작성 및 동기화 (Top 20씩)
                     rankings_list = []
                     
+                    # 랭킹 종목들의 실시간 가격을 일괄 조회하는 헬퍼 함수
+                    def fetch_ranking_price_data(ticker_sym):
+                        """랭킹 종목의 가격과 전일 대비 변동률을 조회하여 (price_str, pc_str) 튜플 반환"""
+                        try:
+                            is_kr = ticker_sym.endswith('.KS') or ticker_sym.endswith('.KQ')
+                            # 이미 recommend용으로 가져온 데이터가 있으면 재사용
+                            if ticker_sym in prices_map:
+                                rp = prices_map[ticker_sym]
+                                rpc = price_changes_map.get(ticker_sym, 0.0)
+                            else:
+                                r_df = yf.download(ticker_sym, period='5d', progress=False)
+                                rp = get_safe_close_price(r_df)
+                                rpc = 0.0
+                                if r_df is not None and not r_df.empty:
+                                    close_c = r_df.get('Close')
+                                    if close_c is not None:
+                                        if isinstance(close_c, pd.DataFrame):
+                                            valid_rc = close_c.iloc[:, 0].dropna()
+                                        else:
+                                            valid_rc = close_c.dropna()
+                                        if len(valid_rc) >= 2:
+                                            prev_c = float(valid_rc.iloc[-2])
+                                            if prev_c > 0 and rp > 0 and not pd.isna(prev_c) and not math.isnan(prev_c):
+                                                rpc = ((rp - prev_c) / prev_c) * 100.0
+                            if pd.isna(rp) or math.isnan(rp) or rp <= 0:
+                                return "N/A", "➖ 0.00%"
+                            price_s = f"₩ {rp:,.0f}" if is_kr else f"$ {rp:,.2f}"
+                            if rpc > 0:
+                                pc_s = f"🔺 +{rpc:.2f}%"
+                            elif rpc < 0:
+                                pc_s = f"🔻 {rpc:.2f}%"
+                            else:
+                                pc_s = "➖ 0.00%"
+                            return price_s, pc_s
+                        except Exception:
+                            return "N/A", "➖ 0.00%"
+                    
                     if ('alpha_results_us' in globals() or 'alpha_results_us' in locals()) and not alpha_results_us.empty:
                         sp500_sorted = alpha_results_us.sort_values(by="Pure_Alpha(%)", ascending=False)
                         for idx, (ticker, row) in enumerate(sp500_sorted.head(20).iterrows()):
+                            r_price_str, r_pc_str = fetch_ranking_price_data(ticker)
                             rankings_list.append({
                                 "name": str(row.get("Name", ticker)),
                                 "symbol": str(ticker),
                                 "market": "S&P500",
                                 "rank": idx + 1,
                                 "score": float(row.get("Pure_Alpha(%)", 0.0)),
-                                "industry": str(row.get("Industry", ""))
+                                "industry": str(row.get("Industry", "")),
+                                "price": r_price_str,
+                                "price_change_str": r_pc_str
                             })
                         if args_cli.test and len(sp500_sorted) < 20:
                             dummy_us = [
@@ -1808,55 +1872,64 @@ if __name__ == "__main__":
                             for idx, (sym, name, ind, score) in enumerate(dummy_us):
                                 if current_len + idx >= 20:
                                     break
+                                d_price_str, d_pc_str = fetch_ranking_price_data(sym)
                                 rankings_list.append({
                                     "name": name,
                                     "symbol": sym,
                                     "market": "S&P500",
                                     "rank": current_len + idx + 1,
                                     "score": score,
-                                    "industry": ind
+                                    "industry": ind,
+                                    "price": d_price_str,
+                                    "price_change_str": d_pc_str
                                 })
                             
                     if ('alpha_results_kr' in globals() or 'alpha_results_kr' in locals()) and not alpha_results_kr.empty:
                         krx_sorted = alpha_results_kr.sort_values(by="Pure_Alpha(%)", ascending=False)
                         for idx, (ticker, row) in enumerate(krx_sorted.head(20).iterrows()):
+                            r_price_str, r_pc_str = fetch_ranking_price_data(ticker)
                             rankings_list.append({
                                 "name": str(row.get("Name", ticker)),
                                 "symbol": str(ticker),
                                 "market": "KRX",
                                 "rank": idx + 1,
                                 "score": float(row.get("Pure_Alpha(%)", 0.0)),
-                                "industry": str(row.get("Industry", ""))
+                                "industry": str(row.get("Industry", "")),
+                                "price": r_price_str,
+                                "price_change_str": r_pc_str
                             })
                         if args_cli.test and len(krx_sorted) < 20:
                             dummy_kr = [
-                                ("005930", "삼성전자", "반도체", 4.5),
-                                ("000660", "SK하이닉스", "반도체", 4.2),
-                                ("005380", "현대자동차", "자동차", 3.9),
-                                ("000270", "기아", "자동차", 3.8),
-                                ("035420", "NAVER", "IT서비스", 3.5),
-                                ("068270", "셀트리온", "바이오헬스", 3.1),
-                                ("005490", "POSCO홀딩스", "철강", 2.9),
-                                ("035720", "카카오", "IT플랫폼", 2.7),
-                                ("051910", "LG화학", "화학", 2.5),
-                                ("006400", "삼성SDI", "이차전지", 2.3),
-                                ("012330", "현대모비스", "자동차부품", 2.1),
-                                ("003550", "LG", "지주회사", 1.9),
-                                ("034730", "SK", "지주회사", 1.8),
-                                ("017670", "SK텔레콤", "통신", 1.7),
-                                ("015760", "한국전력", "유틸리티", 1.6)
+                                ("005930.KS", "삼성전자", "반도체", 4.5),
+                                ("000660.KS", "SK하이닉스", "반도체", 4.2),
+                                ("005380.KS", "현대자동차", "자동차", 3.9),
+                                ("000270.KS", "기아", "자동차", 3.8),
+                                ("035420.KS", "NAVER", "IT서비스", 3.5),
+                                ("068270.KS", "셀트리온", "바이오헬스", 3.1),
+                                ("005490.KS", "POSCO홀딩스", "철강", 2.9),
+                                ("035720.KS", "카카오", "IT플랫폼", 2.7),
+                                ("051910.KS", "LG화학", "화학", 2.5),
+                                ("006400.KS", "삼성SDI", "이차전지", 2.3),
+                                ("012330.KS", "현대모비스", "자동차부품", 2.1),
+                                ("003550.KS", "LG", "지주회사", 1.9),
+                                ("034730.KS", "SK", "지주회사", 1.8),
+                                ("017670.KS", "SK텔레콤", "통신", 1.7),
+                                ("015760.KS", "한국전력", "유틸리티", 1.6)
                             ]
                             current_len = len(krx_sorted)
                             for idx, (sym, name, ind, score) in enumerate(dummy_kr):
                                 if current_len + idx >= 20:
                                     break
+                                d_price_str, d_pc_str = fetch_ranking_price_data(sym)
                                 rankings_list.append({
                                     "name": name,
                                     "symbol": sym,
                                     "market": "KRX",
                                     "rank": current_len + idx + 1,
                                     "score": score,
-                                    "industry": ind
+                                    "industry": ind,
+                                    "price": d_price_str,
+                                    "price_change_str": d_pc_str
                                 })
                             
                     if rankings_list:
