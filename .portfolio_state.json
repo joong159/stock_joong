@@ -262,5 +262,29 @@
         "purchase_price": 55.970001220703125,
         "highest_price": 55.970001220703125,
         "purchase_qty": 1.0
+    },
+    "ROST": {
+        "purchase_date": "2026-07-31 01:10:43",
+        "purchase_price": 252.57000732421875,
+        "highest_price": 252.57000732421875,
+        "purchase_qty": 1.0
+    },
+    "ICE": {
+        "purchase_date": "2026-07-31 01:10:43",
+        "purchase_price": 156.27000427246094,
+        "highest_price": 156.27000427246094,
+        "purchase_qty": 1.0
+    },
+    "SWK": {
+        "purchase_date": "2026-07-31 01:10:43",
+        "purchase_price": 95.55000305175781,
+        "highest_price": 95.55000305175781,
+        "purchase_qty": 1.0
+    },
+    "MSFT": {
+        "purchase_date": "2026-07-31 01:10:43",
+        "purchase_price": 451.1000061035156,
+        "highest_price": 451.1000061035156,
+        "purchase_qty": 1.0
     }
 }
