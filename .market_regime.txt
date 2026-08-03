@@ -1,1 +1,1 @@
-{"US": "SPRING", "KR": "WINTER"}
+{"US": "SPRING", "KR": "SPRING"}

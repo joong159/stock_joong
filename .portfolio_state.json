@@ -304,5 +304,11 @@
         "purchase_price": 186700.0,
         "highest_price": 186700.0,
         "purchase_qty": 1.0
+    },
+    "REGN": {
+        "purchase_date": "2026-08-03 01:11:47",
+        "purchase_price": 762.6300048828125,
+        "highest_price": 762.6300048828125,
+        "purchase_qty": 1.0
     }
 }
