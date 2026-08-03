@@ -74,7 +74,7 @@
     "MTD": {
         "purchase_date": "2026-07-27 10:51:52",
         "purchase_price": 1327.1800537109375,
-        "highest_price": 1416.300048828125,
+        "highest_price": 1445.0,
         "purchase_qty": 1.0
     },
     "DLR": {
@@ -92,7 +92,7 @@
     "TDY": {
         "purchase_date": "2026-07-27 10:51:52",
         "purchase_price": 655.3499755859375,
-        "highest_price": 655.5700073242188,
+        "highest_price": 670.5599975585938,
         "purchase_qty": 1.0
     },
     "TMO": {
@@ -104,7 +104,7 @@
     "LMT": {
         "purchase_date": "2026-07-27 10:51:52",
         "purchase_price": 582.5999755859375,
-        "highest_price": 582.739990234375,
+        "highest_price": 586.2899780273438,
         "purchase_qty": 1.0
     },
     "ADM": {
@@ -158,7 +158,7 @@
     "VRSN": {
         "purchase_date": "2026-07-27 11:57:19",
         "purchase_price": 280.0,
-        "highest_price": 290.9200134277344,
+        "highest_price": 298.8900146484375,
         "purchase_qty": 1.0
     },
     "WDAY": {
@@ -206,7 +206,7 @@
     "GRMN": {
         "purchase_date": "2026-07-30 00:59:39",
         "purchase_price": 294.8299865722656,
-        "highest_price": 297.54998779296875,
+        "highest_price": 304.760009765625,
         "purchase_qty": 1.0
     },
     "CTSH": {
@@ -218,7 +218,7 @@
     "ROST": {
         "purchase_date": "2026-07-31 01:10:43",
         "purchase_price": 252.57000732421875,
-        "highest_price": 252.57000732421875,
+        "highest_price": 252.91000366210938,
         "purchase_qty": 1.0
     },
     "ICE": {
@@ -230,13 +230,13 @@
     "SWK": {
         "purchase_date": "2026-07-31 01:10:43",
         "purchase_price": 95.55000305175781,
-        "highest_price": 95.55000305175781,
+        "highest_price": 98.11000061035156,
         "purchase_qty": 1.0
     },
     "MSFT": {
         "purchase_date": "2026-07-31 01:10:43",
         "purchase_price": 451.1000061035156,
-        "highest_price": 464.7200012207031,
+        "highest_price": 487.6499938964844,
         "purchase_qty": 1.0
     },
     "009540.KS": {
