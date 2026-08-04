@@ -9,6 +9,16 @@ on:
     #    (UTC 기준: 월~금 20:30 = KST 화~토 05:30)
     - cron: '30 20 * * 1-5'
   workflow_dispatch: # 필요 시 언제든 수동 실행 가능 버튼 제공
+    inputs:
+      market_filter:
+        description: "수동 실행 시 대상 시장 강제 지정 (비워두면 국장+미장 전체 실행)"
+        required: false
+        type: choice
+        default: ""
+        options:
+          - ""
+          - "KRX"
+          - "SP500"
 
 permissions:
   contents: write # 상태 파일(.portfolio_state.json, .market_regime.txt) 커밋/푸시 권한
@@ -49,21 +59,35 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Determine Market Filter
+        id: market
+        run: |
+          # 크론 스케줄 문자열로 이번 실행이 국장(08:30 KST)인지 미장(05:30 KST)인지 판별합니다.
+          # workflow_dispatch 수동 실행은 입력값을 그대로 사용(비워두면 국장+미장 전체 실행).
+          SCHEDULE="${{ github.event.schedule }}"
+          if [ "$SCHEDULE" = "30 23 * * 0-4" ]; then
+            FILTER="KRX"
+          elif [ "$SCHEDULE" = "30 20 * * 1-5" ]; then
+            FILTER="SP500"
+          else
+            FILTER="${{ github.event.inputs.market_filter }}"
+          fi
+          echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
+          echo "이번 실행 대상 시장: ${FILTER:-전체(국장+미장)}"
+
       - name: Run Quant Analyzer
         env:
-          TOSS_CLIENT_ID: ${{ secrets.TOSS_CLIENT_ID }}
-          TOSS_CLIENT_SECRET: ${{ secrets.TOSS_CLIENT_SECRET }}
-          TOSS_BASE_URL: ${{ secrets.TOSS_BASE_URL || 'https://openapi.tossinvest.com' }}
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          MARKET_FILTER: ${{ steps.market.outputs.filter }}
         run: |
-          if [ "${{ secrets.EXECUTE_TRADES }}" = "true" ]; then
-            python quant_analyzer.py --execute
-          else
-            python quant_analyzer.py
+          MARKET_ARG=""
+          if [ -n "$MARKET_FILTER" ]; then
+            MARKET_ARG="--market-filter $MARKET_FILTER"
           fi
+          python quant_analyzer.py $MARKET_ARG
 
       - name: Run News Sync
         env:

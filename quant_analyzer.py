@@ -215,17 +215,28 @@ def get_neutralized_alpha(market='SP500', is_test=False, cache=None):
             log_error(f"S&P 500 목록 조회 실패: {e}")
             return pd.DataFrame()
     elif market == 'KRX':
-        log_info("KRX 시가총액 상위 100개 종목 유니버스를 수집 및 도출합니다...")
+        log_info("KRX 시가총액 상위 200개 종목 유니버스를 수집 및 도출합니다...")
         stocks = {}
         names = {}
         try:
+            # 'KRX' 리스팅은 시가총액(Marcap) 내림차순으로 제공되지만 'Sector' 컬럼이 없어
+            # (구버전 FDR 스키마 가정으로) 과거 코드가 항상 예외로 빠져 고정된 90종목 폴백 리스트만 써왔던 문제를 수정.
             krx_df = fdr.StockListing('KRX')
-            krx_df = krx_df.dropna(subset=['Sector']).head(100)
+            krx_df = krx_df.dropna(subset=['Marcap']).sort_values('Marcap', ascending=False).head(200)
+
+            # 업종(Sector)은 별도의 KRX-DESC(기업개요) 목록에서 종목코드 기준으로 보강
+            sector_map = {}
+            try:
+                desc_df = fdr.StockListing('KRX-DESC')
+                sector_map = dict(zip(desc_df['Code'].astype(str).str.zfill(6), desc_df['Sector']))
+            except Exception as e_desc:
+                log_warn(f"KRX 업종 상세 정보 조회 실패 ({e_desc}). 업종 중립화 없이 진행합니다.")
+
             for _, row in krx_df.iterrows():
                 code = str(row['Code']).zfill(6)
                 market_type = str(row['Market'])
                 ticker_key = f"{code}.KQ" if 'KOSDAQ' in market_type else f"{code}.KS"
-                stocks[ticker_key] = row['Sector']
+                stocks[ticker_key] = sector_map.get(code) or 'Unknown'
                 names[ticker_key] = row['Name']
             benchmark_ticker = '^KS11'
         except Exception as e:
@@ -857,8 +868,10 @@ def get_toss_symbol(target_ticker):
 def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None, purchase_price=None):
     """
     Chandelier Exit (ATR 기반 트레일링 스톱 + 수익 보장 타이트 익절) 조건 만족 여부를 검증합니다.
-    - 기본 매도조건: 현재가 < 최고가 - (3.0 * ATR(14))
-    - 고도화: 매수가 대비 최고가가 +15% 이상 달성된 경우, 이익 보존을 위해 트레일링 스톱을 (1.5 * ATR(14))로 타이트하게 바짝 당깁니다!
+    - 기본 매도조건: 현재가 < 최고가 - (3.0 * ATR(14)) — 주간 리밸런싱 추세추종 특성상 휩쏘 방지를 위해 표준 배수(3.0) 사용
+    - 1단계 익절 보호: 매수가 대비 최고가가 +8% 이상이면 (2.0 * ATR(14))로 완만하게 조여 이익을 보호
+    - 2단계 익절 보호: 매수가 대비 최고가가 +15% 이상이면 (1.5 * ATR(14))로 타이트하게 바짝 당김
+    (3.0 -> 1.5로 한 번에 급격히 좁히면 +15% 문턱을 넘는 순간 변동성만으로 조기 손절될 수 있어, 8%/15% 2단계로 완만하게 나눠 조입니다.)
     """
     try:
         df_ticker = None
@@ -880,10 +893,14 @@ def check_chandelier_exit(ticker, current_price, highest_price, data_ohlcv=None,
         # ATR(14) 연산 호출
         atr = AlphaFactory.alpha_atr(df_ticker, period=14)
         
-        # +15% 이익 도달 여부에 따라 트레일링 스톱 계수 결정 (기본 3.0 -> 타이트 익절 1.5)
+        # 이익 도달 구간에 따라 트레일링 스톱 계수를 3단계로 완만하게 조임 (3.0 -> 2.0 -> 1.5)
         multiplier = 3.0
-        if purchase_price and purchase_price > 0 and highest_price >= purchase_price * 1.15:
-            multiplier = 1.5
+        if purchase_price and purchase_price > 0:
+            profit_ratio = highest_price / purchase_price
+            if profit_ratio >= 1.15:
+                multiplier = 1.5
+            elif profit_ratio >= 1.08:
+                multiplier = 2.0
             
         stop_price = highest_price - (multiplier * atr)
         is_stop_hit = current_price < stop_price
@@ -929,35 +946,18 @@ if __name__ == "__main__":
     print_banner()
     
     # CLI 인자 파싱
-    parser = argparse.ArgumentParser(description="김민겸 전략 기반 글로벌 퀀트 분석기 (토스증권 API 연동)")
-    parser.add_argument('--capital', type=float, default=10000000, help="투자 자본금 (기본값: 10,000,000 KRW, 토스 연동 시 자동 갱신)")
+    parser = argparse.ArgumentParser(description="김민겸 전략 기반 글로벌 퀀트 분석기")
+    parser.add_argument('--capital', type=float, default=10000000, help="시뮬레이터 운용 자본금 (기본값: 10,000,000 KRW)")
     parser.add_argument('--output', type=str, default=None, help="결과 엑셀 파일 저장 경로 (생략 시 다이얼로그 또는 기본 경로)")
     parser.add_argument('--no-cache', action='store_true', help="캐시를 사용하지 않고 새로 고침")
     parser.add_argument('--test', action='store_true', help="테스트용 소형 유니버스(11개 종목)로 실행")
-    parser.add_argument('--execute', action='store_true', help="실제 토스증권 API를 호출하여 매매 주문을 실행")
     parser.add_argument('--market-filter', choices=['KRX', 'SP500'], default=None, help="실행할 시장 필터 (KRX 또는 SP500)")
     args_cli = parser.parse_args()
-    
+
     log_info("퀀트 분석을 시작합니다...")
-    
-    # .env 로드 및 TOSS API 클라이언트 초기화
+
     load_dotenv()
-    toss_client_id = os.environ.get("TOSS_CLIENT_ID")
-    toss_client_secret = os.environ.get("TOSS_CLIENT_SECRET")
-    toss_base_url = os.environ.get("TOSS_BASE_URL", "https://openapi.tossinvest.com")
-    
-    toss_client = None
-    if toss_client_id and toss_client_secret and toss_client_id not in ["your_client_id_here", ""]:
-        try:
-            from toss_api import TossinvestClient
-            toss_client = TossinvestClient(toss_client_id, toss_client_secret, toss_base_url)
-            log_success("토스증권 API 연동 모듈 로드 완료! (실거래 모드)")
-        except Exception as e:
-            log_info("토스증권 API 미연동 ➔ 노션 시뮬레이터 모드로 전환합니다.")
-            toss_client = None
-    else:
-        log_info("토스증권 API 키 미설정 ➔ 노션 대시보드 연동 시뮬레이터 모드로 작동합니다.")
-            
+
     rates, sp500, vix, kospi = fetch_market_data()
     
     if rates is not None and not rates.empty:
@@ -977,6 +977,13 @@ if __name__ == "__main__":
             portfolio_state.save_market_regime({"US": current_regime[0], "KR": current_regime[1]})
         except Exception as ex:
             print(f"[REGIME SAVE WARNING] {ex}")
+
+        # 노션 대시보드 홈페이지 커버/아이콘/계절 안내 블록 갱신 (market_filter와 무관하게 항상 최신 국면 반영)
+        try:
+            from notion_sync import update_notion_regime_style
+            update_notion_regime_style({"US": current_regime[0], "KR": current_regime[1]})
+        except Exception as ex:
+            print(f"[REGIME STYLE UPDATE WARNING] {ex}")
         
         print("\n" + "="*60)
         log_success(f"현재 시장 국면 - 미장(US): {Colors.BOLD}{current_regime[0]}{Colors.RESET} | 국장(KR): {Colors.BOLD}{current_regime[1]}{Colors.RESET}")
@@ -1419,193 +1426,41 @@ if __name__ == "__main__":
                     print(print_df.to_string())
                     print("="*60 + "\n")
                     
-                    # (Notion sync moved outside of the if-block to run unconditionally)
-                    pass
-                    
-                    # 실제 TOSS 주문 실행
-                    if args_cli.execute:
-                        if toss_client is None:
-                            log_info("[노션 시뮬레이터 모드] 토스증권 API 미연동 상태입니다. 실계좌 주문을 전송하지 않고 노션 대시보드 시뮬레이션으로 기록합니다.")
-                        else:
-                            log_warn("🚨 토스증권 API를 통해 계좌 실주문을 전송합니다.")
-                            kr_open = is_kr_market_open()
-                            us_open = is_us_market_open()
-                            log_info(f"⏰ 현재 시장 영업 상태: 한국 시장(KRX) - {'영업중' if kr_open else '휴장중'} | 미국 시장(S&P500) - {'영업중' if us_open else '휴장중'}")
-                            
-                            # 0. 기존 미체결/예약 주문 취소
-                            log_info("0단계: 기존 대기 중인 예약/미체결 주문 취소 검토 중...")
-                            try:
-                                pending_orders = toss_client.get_orders(status="OPEN")
-                                if pending_orders:
-                                    log_info(f"조회된 대기 주문 수: {len(pending_orders)}개")
-                                    # 리밸런싱 대상이거나 분석 대상 유니버스에 속한 종목의 대기 주문을 취소합니다.
-                                    symbols_to_cancel = set(df_rebal['Toss_Symbol'].tolist())
-                                    cancelled_count = 0
-                                    for p_ord in pending_orders:
-                                        p_symbol = p_ord.get("symbol")
-                                        p_order_id = p_ord.get("orderId")
-                                        
-                                        is_us = not p_symbol.isdigit()
-                                        
-                                        # 시장 필터링 적용
-                                        if args_cli.market_filter == 'KRX' and is_us:
-                                            continue
-                                        if args_cli.market_filter == 'SP500' and not is_us:
-                                            continue
-                                            
-                                        if is_us and not us_open:
-                                            continue
-                                        if not is_us and not kr_open:
-                                            continue
-                                            
-                                        if p_symbol in symbols_to_cancel or any(get_toss_symbol(t) == p_symbol for t in alpha_results.index):
-                                            log_warn(f"[{p_symbol}] 대기 중인 기존 예약 주문(ID: {p_order_id}) 취소 요청 중...")
-                                            toss_client.cancel_order(p_order_id)
-                                            cancelled_count += 1
-                                    if cancelled_count > 0:
-                                        log_success(f"총 {cancelled_count}개의 대기 주문을 취소 완료했습니다.")
-                                        time.sleep(1) # 취소 처리 지연 대기
-                                    else:
-                                        log_info("취소 대상인 대기 주문이 없습니다.")
-                                else:
-                                    log_info("대기 중인 예약/미체결 주문이 없습니다.")
-                            except Exception as e:
-                                log_warn(f"기존 대기 주문 자동 취소 처리 중 오류 발생 (건너뜀): {e}")
+                    # 시뮬레이터 모드 가상 포트폴리오 상태 업데이트 (실주문 없이 추천/기록 전용)
+                    log_info("가상 포트폴리오 상태(Supabase/로컬)를 업데이트합니다...")
+                    try:
+                        state = load_portfolio_state()
+                    except Exception:
+                        state = {}
+                    new_state = {}
+                    for ticker, row in df_rebal.iterrows():
+                        act = row['Action']
+                        sym = row['Toss_Symbol']
+                        if act in ["HOLD", "KEEP"]:
+                            old_info = state.get(sym, {})
+                            new_state[sym] = {
+                                "purchase_date": old_info.get("purchase_date", time.strftime('%Y-%m-%d %H:%M:%S')),
+                                "purchase_price": old_info.get("purchase_price", row['Current_Price']),
+                                "highest_price": max(old_info.get("highest_price", row['Current_Price']), row['Current_Price']),
+                                "purchase_qty": row['Target_Qty']
+                            }
+                        elif act == "BUY":
+                            new_state[sym] = {
+                                "purchase_date": time.strftime('%Y-%m-%d %H:%M:%S'),
+                                "purchase_price": row['Current_Price'],
+                                "highest_price": row['Current_Price'],
+                                "purchase_qty": row['Target_Qty']
+                            }
+                    save_portfolio_state(new_state)
+                    log_success("가상 포트폴리오 상태 파일(Supabase/로컬)이 성공적으로 갱신되었습니다.")
 
-                            
-                            # 1. 매도 주문 실행 (현금 예수금 확보)
-                            log_info("1단계: 매도(SELL) 주문 전송 중...")
-                            sell_orders = df_rebal[df_rebal['Diff_Qty'] < 0]
-                            for t_name, row in sell_orders.iterrows():
-                                sym = row['Toss_Symbol']
-                                is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
-                                
-                                # 시장 필터링 적용
-                                if args_cli.market_filter == 'KRX' and is_us:
-                                    continue
-                                if args_cli.market_filter == 'SP500' and not is_us:
-                                    continue
-                                    
-                                if is_us:
-                                    # 미국 주식은 소수점 수량 매도 지원
-                                    qty = abs(float(row['Diff_Qty']))
-                                else:
-                                    qty = int(abs(row['Diff_Qty']))
-                                    
-                                if qty <= 0.0: continue
-                                
-                                if is_us and not us_open:
-                                    log_warn(f"[{t_name}] 미국 시장이 휴장 상태이므로 매도 주문을 전송하지 않고 건너뜁니다. (미국 시장 개장 시간: 한국 시간 22:30 ~ 06:00)")
-                                    continue
-                                if not is_us and not kr_open:
-                                    log_warn(f"[{t_name}] 한국 시장이 휴장 상태이므로 매도 주문을 전송하지 않고 건너뜁니다. (한국 시장 개장 시간: 평일 09:00 ~ 15:30)")
-                                    continue
-                                    
-                                log_info(f"[{t_name}] 매도 주문 전송: {qty}주 (사유: {row['Reason']})")
-                                try:
-                                    res = toss_client.create_order(symbol=sym, side="SELL", quantity=qty, order_type="MARKET")
-                                    log_success(f"[{t_name}] 매도 완료! (주문번호: {res.get('orderId')})")
-                                    try:
-                                        from notion_sync import log_trade_to_notion
-                                        val_krw = qty * float(row['Current_Price'])
-                                        if is_us:
-                                            val_krw *= usd_krw
-                                        log_trade_to_notion(symbol=sym, name=row['Name'], side="SELL", qty=qty, price=float(row['Current_Price']), val_krw=val_krw, reason=row['Reason'])
-                                    except Exception as ex:
-                                        log_warn(f"노션 일지 기록 실패: {ex}")
-                                except Exception as e:
-                                    log_error(f"[{t_name}] 매도 실패: {e}")
-                                    
-                            # 2. 매수 주문 실행
-                            log_info("2단계: 매수(BUY) 주문 전송 중...")
-                            buy_orders = df_rebal[df_rebal['Diff_Qty'] > 0]
-                            for t_name, row in buy_orders.iterrows():
-                                sym = row['Toss_Symbol']
-                                is_us = not (t_name.endswith('.KS') or t_name.endswith('.KQ'))
-                                
-                                # 시장 필터링 적용
-                                if args_cli.market_filter == 'KRX' and is_us:
-                                    continue
-                                if args_cli.market_filter == 'SP500' and not is_us:
-                                    continue
-                                    
-                                if is_us and not us_open:
-                                    log_warn(f"[{t_name}] 미국 시장이 휴장 상태이므로 매수 주문을 전송하지 않고 건너뜁니다. (미국 시장 개장 시간: 한국 시간 22:30 ~ 06:00)")
-                                    continue
-                                if not is_us and not kr_open:
-                                    log_warn(f"[{t_name}] 한국 시장이 휴장 상태이므로 매수 주문을 전송하지 않고 건너뜁니다. (한국 시장 개장 시간: 평일 09:00 ~ 15:30)")
-                                    continue
-                                    
-                                try:
-                                    if is_us:
-                                        # 미국 주식은 달러 기준 금액 매수 주문 (소수점 구매 실행)
-                                        val_usd = float(row.get('Diff_Value(KRW)', 0.0)) / usd_krw
-                                        if val_usd >= 1.0:
-                                            log_info(f"[{t_name}] 미국 소수점 금액 매수 주문 전송: ${val_usd:.2f} USD (사유: {row['Reason']})")
-                                            res = toss_client.create_order(symbol=sym, side="BUY", order_amount=round(val_usd, 2), order_type="MARKET")
-                                            log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
-                                            try:
-                                                from notion_sync import log_trade_to_notion
-                                                val_krw = float(row.get('Diff_Value(KRW)', 0.0))
-                                                log_trade_to_notion(symbol=sym, name=row['Name'], side="BUY", qty=val_usd / float(row['Current_Price']), price=float(row['Current_Price']), val_krw=val_krw, reason=row['Reason'])
-                                            except Exception as ex:
-                                                log_warn(f"노션 일지 기록 실패: {ex}")
-                                        else:
-                                            log_warn(f"[{t_name}] 미국 주식 매수 예산(${val_usd:.2f})이 최소 기준인 $1.00 미만이어서 건너뜁니다.")
-                                    else:
-                                        qty = int(row['Diff_Qty'])
-                                        if qty > 0:
-                                            log_info(f"[{t_name}] 매수 주문 전송: {qty}주 (사유: {row['Reason']})")
-                                            res = toss_client.create_order(symbol=sym, side="BUY", quantity=qty, order_type="MARKET")
-                                            log_success(f"[{t_name}] 매수 완료! (주문번호: {res.get('orderId')})")
-                                            try:
-                                                from notion_sync import log_trade_to_notion
-                                                val_krw = qty * float(row['Current_Price'])
-                                                log_trade_to_notion(symbol=sym, name=row['Name'], side="BUY", qty=qty, price=float(row['Current_Price']), val_krw=val_krw, reason=row['Reason'])
-                                            except Exception as ex:
-                                                log_warn(f"노션 일지 기록 실패: {ex}")
-                                except Exception as e:
-                                    log_error(f"[{t_name}] 매수 실패: {e}")
-                                    
-                            log_success("포트폴리오 리밸런싱 주문 처리가 마무리되었습니다.")
-                    else:
-                        # 시뮬레이터 모드 가상 주문 업데이트
-                        log_info("시뮬레이터 모드: 가상 포트폴리오 상태(Supabase/로컬)를 업데이트합니다...")
-                        try:
-                            state = load_portfolio_state()
-                        except Exception:
-                            state = {}
-                        new_state = {}
-                        for ticker, row in df_rebal.iterrows():
-                            act = row['Action']
-                            sym = row['Toss_Symbol']
-                            if act in ["HOLD", "KEEP"]:
-                                old_info = state.get(sym, {})
-                                new_state[sym] = {
-                                    "purchase_date": old_info.get("purchase_date", time.strftime('%Y-%m-%d %H:%M:%S')),
-                                    "purchase_price": old_info.get("purchase_price", row['Current_Price']),
-                                    "highest_price": max(old_info.get("highest_price", row['Current_Price']), row['Current_Price']),
-                                    "purchase_qty": row['Target_Qty']
-                                }
-                            elif act == "BUY":
-                                new_state[sym] = {
-                                    "purchase_date": time.strftime('%Y-%m-%d %H:%M:%S'),
-                                    "purchase_price": row['Current_Price'],
-                                    "highest_price": row['Current_Price'],
-                                    "purchase_qty": row['Target_Qty']
-                                }
-                        save_portfolio_state(new_state)
-                        log_success("가상 포트폴리오 상태 파일(Supabase/로컬)이 성공적으로 갱신되었습니다.")
-                        if toss_client:
-                            log_info("참고: 실계좌로 리밸런싱 주문을 접수하려면 '--execute' 인자를 추가하세요. (예: python quant_analyzer.py --execute)")
-                
                 # 윈도우(GUI) 탐색기를 띄워 저장할 폴더 및 파일명 설정
                 output_filename = args_cli.output
                 if not output_filename:
                     import sys
                     is_background = not sys.stdout.isatty() or args_cli.test
                     
-                    if args_cli.execute or is_background:
+                    if is_background:
                         output_filename = 'stock_analysis_results.xlsx'
                     else:
                         try:
@@ -1629,55 +1484,10 @@ if __name__ == "__main__":
                     log_warn(f"저장 위치가 선택되지 않아 기본 경로 및 파일명으로 지정합니다: {output_filename}")
                 
 
-                # 💡 퀀트 추천 포트폴리오 및 실시간 보유 잔고 노션 동기화
+                # 💡 퀀트 추천 포트폴리오 노션 동기화
                 try:
-                    import threading
-                    from notion_sync import sync_recommended_portfolio_to_notion, sync_rankings_to_notion, sync_holdings_to_notion
-                    
-                    # 0. 실시간 보유 잔고 현황 동기화
-                    try:
-                        holdings_list = []
-                        for item in toss_holdings:
-                            sym = item.get("symbol")
-                            qty = float(item.get("quantity", 0.0))
-                            price = float(item.get("lastPrice", 0.0))
-                            currency = item.get("currency", "KRW")
-                            
-                            name = sym
-                            for t in alpha_results.index:
-                                if get_toss_symbol(t) == sym:
-                                    name = alpha_results.at[t, 'Name'] if 'Name' in alpha_results.columns else t
-                                    break
-                                    
-                            avg_buy_price = float(item.get("averagePurchasePrice", 0.0))
-                            pl_dict = item.get("profitLoss", {})
-                            if pl_dict:
-                                pl_rate = float(pl_dict.get("rate", 0.0)) * 100.0
-                            else:
-                                if avg_buy_price > 0.0:
-                                    pl_rate = ((price - avg_buy_price) / avg_buy_price) * 100.0
-                                else:
-                                    pl_rate = 0.0
-                                    
-                            avg_buy_price_krw = avg_buy_price * usd_krw if currency == "USD" else avg_buy_price
-                            purchase_val_krw = qty * avg_buy_price_krw
-                            if purchase_val_krw <= 0.0:
-                                price_krw = price * usd_krw if currency == "USD" else price
-                                purchase_val_krw = qty * price_krw
-                                
-                            price_krw = price * usd_krw if currency == "USD" else price
-                            val_krw = qty * price_krw
-                            
-                            holdings_list.append((sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency))
-                            
-                        total_cash_val = cash_balance_krw + (cash_balance_usd * usd_krw)
-                        stock_valuation = (current_us_value_usd * usd_krw) + current_kr_value_krw
-                        total_assets = total_cash_val + stock_valuation
-                        
-                        sync_holdings_to_notion(holdings_list, total_assets, (total_cash_val, cash_balance_krw, cash_balance_usd), stock_valuation, usd_krw)
-                    except Exception as ex_holdings:
-                        print(f"[Notion Holdings Sync Error] {ex_holdings}")
-                    
+                    from notion_sync import sync_recommended_portfolio_to_notion, sync_rankings_to_notion
+
                     # 1. 추천 포트폴리오 (액션 포함)
                     recommend_list = []
                     # 현재 보유 중인 종목 기호 세트 (quantity > 0)
@@ -1748,7 +1558,7 @@ if __name__ == "__main__":
                         })
                         
                     if recommend_list:
-                        sync_recommended_portfolio_to_notion(recommend_list)
+                        sync_recommended_portfolio_to_notion(recommend_list, market_filter=args_cli.market_filter)
                         
                         # 🚨 매도(SELL) 시그널 전용 데이터베이스 동기화
                         try:
@@ -1795,7 +1605,7 @@ if __name__ == "__main__":
                                             "price": rebal_price_str,
                                             "price_change_str": rebal_pc_str
                                         })
-                            sync_sell_signals_to_notion(sell_items)
+                            sync_sell_signals_to_notion(sell_items, market_filter=args_cli.market_filter)
                         except Exception as ex_sell:
                             print(f"[Notion Sell Sync Error] {ex_sell}")
                         
@@ -1933,7 +1743,7 @@ if __name__ == "__main__":
                                 })
                             
                     if rankings_list:
-                        sync_rankings_to_notion(rankings_list)
+                        sync_rankings_to_notion(rankings_list, market_filter=args_cli.market_filter)
                         
                     # 3. 포트폴리오 비중 배분 원형 차트 (Pie Chart) 이미지 로컬 저장
                     try:

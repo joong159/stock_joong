@@ -267,219 +267,6 @@ def find_database_by_name(name):
         print(f"[Notion Connection Error] {e}")
     return None
 
-def update_notion_kpi_card(total_assets, cash_balance, stock_valuation, usd_krw, holdings_list):
-    """
-    노션 대시보드 페이지 상단에 총 자산, 예수금, 주식 평가액, 총 평가 손익 등의 현황을
-    가독성이 뛰어난 프리미엄 자산 현황판(KPI Card)으로 생성하거나 실시간 업데이트합니다.
-    """
-    if not NOTION_TOKEN:
-        return
-    db_id = find_database_by_name("실시간 보유 잔고 현황")
-    if not db_id:
-        return
-        
-    try:
-        # 1. DB 정보를 조회하여 상위(parent) 페이지 ID를 획득합니다.
-        db_url = f"https://api.notion.com/v1/databases/{db_id}"
-        db_res = requests.get(db_url, headers=HEADERS, timeout=10)
-        if db_res.status_code != 200:
-            return
-        parent_page = db_res.json().get("parent", {})
-        page_id = parent_page.get("page_id")
-        if not page_id:
-            return
-            
-        # 2. 페이지 본문 블록 목록을 조회하여 기존 KPI 카드가 있는지 검색합니다.
-        blocks_url = f"https://api.notion.com/v1/blocks/{page_id}/children"
-        b_res = requests.get(blocks_url, headers=HEADERS, timeout=10)
-        kpi_block_id = None
-        if b_res.status_code == 200:
-            blocks = b_res.json().get("results", [])
-            for block in blocks:
-                if block.get("type") == "callout":
-                    c_texts = block.get("callout", {}).get("rich_text", [])
-                    c_text = "".join([t.get("plain_text", "") for t in c_texts]).strip()
-                    if "실시간 자산 및 리밸런싱 현황판" in c_text or "Real-time KPI Summary" in c_text:
-                        kpi_block_id = block.get("id")
-                        break
-                        
-        # 3. 누적 평가 수익 및 수익률 계산
-        total_purchase_val = 0.0
-        total_current_val = 0.0
-        for item in holdings_list:
-            # item 형식: (symbol, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency)
-            if len(item) >= 6:
-                total_purchase_val += float(item[4])
-                total_current_val += float(item[5])
-                
-        total_pl = total_current_val - total_purchase_val
-        pl_rate = (total_pl / total_purchase_val) * 100 if total_purchase_val > 0 else 0.0
-        
-        # 4. 현황판에 표시할 텍스트 템플릿 구성
-        kpi_text = (
-            f"📊 실시간 자산 및 리밸런싱 현황판 (Real-time KPI Summary)\n"
-            f"• 실시간 총 자산 (자산 평가금): ₩ {total_assets:,.0f}\n"
-            f"• 보유 예수금 (CASH): ₩ {cash_balance:,.0f}\n"
-            f"• 주식 평가액 (STOCKS): ₩ {stock_valuation:,.0f}\n"
-            f"• 포트폴리오 평가 손익: ₩ {total_pl:+,.0f} ({pl_rate:+.2f}%)\n"
-            f"• 기준 고시 환율 (USD/KRW): ₩ {usd_krw:,.2f}\n"
-            f"• 마지막 대시보드 갱신 시간: {get_kst_now().strftime('%Y-%m-%d %H:%M:%S')}"
-        )
-        
-        if kpi_block_id:
-            # 기존 블록 내용 패치 (실시간 업데이트)
-            patch_url = f"https://api.notion.com/v1/blocks/{kpi_block_id}"
-            payload = {
-                "callout": {
-                    "rich_text": [{"type": "text", "text": {"content": kpi_text}}],
-                    "icon": {"type": "emoji", "emoji": "📊"},
-                    "color": "green_background"
-                }
-            }
-            requests.patch(patch_url, headers=HEADERS, json=payload, timeout=10)
-        else:
-            # 없을 경우 신규 생성하여 추가 (본문 최상단에 근접하도록 추가)
-            payload = {
-                "children": [
-                    {
-                        "object": "block",
-                        "type": "callout",
-                        "callout": {
-                            "rich_text": [{"type": "text", "text": {"content": kpi_text}}],
-                            "icon": {"type": "emoji", "emoji": "📊"},
-                            "color": "green_background"
-                        }
-                    }
-                ]
-            }
-            requests.patch(blocks_url, headers=HEADERS, json=payload, timeout=10)
-            
-    except Exception as e:
-        print(f"[Notion KPI Update Error] {e}")
-
-def sync_holdings_to_notion(holdings_list, total_assets=None, cash_balance=None, stock_valuation=None, usd_krw=None):
-    """
-    실시간 보유 주식 잔고 현황을 노션 데이터베이스('실시간 보유 잔고 현황')와 완벽 동기화합니다.
-    - holdings_list: (symbol, name, qty, price, val_krw, currency) 튜플 리스트
-    """
-    if not NOTION_TOKEN:
-        return
-        
-    db_id = find_database_by_name("실시간 보유 잔고 현황")
-    if not db_id:
-        print("[Notion Sync] '실시간 보유 잔고 현황' 데이터베이스를 찾을 수 없어 노션 동기화를 건너뜁니다.")
-        return
-        
-    try:
-        # 실시간 자산 현황판 KPI 블록 동적 갱신
-        if total_assets is not None:
-            update_notion_kpi_card(total_assets, cash_balance, stock_valuation, usd_krw, holdings_list)
-
-        # 시장 국면 로드하여 노션 페이지 스타일 동적 업데이트 (Supabase 동기화 반영)
-        try:
-            import portfolio_state
-            regime_val = portfolio_state.load_market_regime()
-            update_notion_regime_style(regime_val)
-        except Exception:
-            pass
-
-        # 1. 노션 데이터베이스의 기존 페이지 조회
-        query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
-        res = requests.post(query_url, headers=HEADERS, json={}, timeout=10)
-        res.raise_for_status()
-        existing_pages = res.json().get("results", [])
-        
-        # Symbol -> PageID 리스트 매핑 딕셔너리 구축 (중복 제거용)
-        notion_holdings = {}
-        for page in existing_pages:
-            page_id = page.get("id")
-            props = page.get("properties", {})
-            
-            # Symbol 속성 읽기
-            symbol_prop = props.get("Symbol", {}).get("rich_text", [])
-            symbol = "".join([t.get("plain_text", "") for t in symbol_prop]).strip()
-            if symbol:
-                if symbol not in notion_holdings:
-                    notion_holdings[symbol] = []
-                notion_holdings[symbol].append(page_id)
-
-        # 데이터베이스 스키마 보완 (칼럼들 타입을 rich_text로 변경하여 형식 통일 및 깔끔하게 노출)
-        try:
-            update_db_url = f"https://api.notion.com/v1/databases/{db_id}"
-            schema_payload = {
-                "properties": {
-                    "Qty": {"rich_text": {}},
-                    "Price": {"rich_text": {}},
-                    "PurchaseVal": {"rich_text": {}},
-                    "Value": {"rich_text": {}},
-                    "ProfitLoss": {"rich_text": {}}
-                }
-            }
-            requests.patch(update_db_url, headers=HEADERS, json=schema_payload, timeout=10)
-        except Exception:
-            pass
-
-        # 2. 실시간 잔고 동기화 진행
-        active_symbols = set()
-        for item in holdings_list:
-            sym, name, qty, price, purchase_val_krw, val_krw, pl_rate, currency = item
-            active_symbols.add(sym)
-            
-            # 값 예쁘게 원화 및 달러 기호 포맷팅
-            if currency == "USD":
-                qty_str = f"{qty:.4f}" if qty % 1 != 0 else f"{int(qty)}"
-                price_krw = (val_krw / qty) if qty > 0 else (price * 1350.0)
-                price_str = f"$ {price:,.2f} (₩ {price_krw:,.0f})"
-            else:
-                qty_str = f"{qty:,.0f}"
-                price_str = f"₩ {price:,.0f}"
-                
-            purchase_val_str = f"₩ {purchase_val_krw:,.0f}"
-            val_str = f"₩ {val_krw:,.0f}"
-            pl_str = f"{pl_rate:+.2f}%"
-            
-            # 노션 데이터베이스 속성 빌드
-            properties = {
-                "Name": {"title": [{"text": {"content": name}}]},
-                "Symbol": {"rich_text": [{"text": {"content": sym}}]},
-                "Qty": {"rich_text": [{"text": {"content": qty_str}}]},
-                "Price": {"rich_text": [{"text": {"content": price_str}}]},
-                "PurchaseVal": {"rich_text": [{"text": {"content": purchase_val_str}}]},
-                "Value": {"rich_text": [{"text": {"content": val_str}}]},
-                "ProfitLoss": {"rich_text": [{"text": {"content": pl_str}}]},
-                "Currency": {"select": {"name": currency}}
-            }
-            
-            if sym in notion_holdings and notion_holdings[sym]:
-                # 기존 항목 정보 업데이트 (첫 번째 페이지 활용)
-                page_ids = notion_holdings[sym]
-                page_id = page_ids[0]
-                update_url = f"https://api.notion.com/v1/pages/{page_id}"
-                requests.patch(update_url, headers=HEADERS, json={"properties": properties}, timeout=10)
-                
-                # 나머지 중복 페이지들은 즉시 아카이브 처리하여 중복 제거!
-                for extra_page_id in page_ids[1:]:
-                    requests.patch(f"https://api.notion.com/v1/pages/{extra_page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
-            else:
-                # 신규 항목 생성
-                create_url = "https://api.notion.com/v1/pages"
-                payload = {
-                    "parent": {"database_id": db_id},
-                    "properties": properties
-                }
-                requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
-
-        # 3. 더 이상 보유하지 않는 종목 삭제 (Archived 처리)
-        for sym, page_ids in notion_holdings.items():
-            if sym not in active_symbols:
-                for page_id in page_ids:
-                    delete_url = f"https://api.notion.com/v1/pages/{page_id}"
-                    requests.patch(delete_url, headers=HEADERS, json={"archived": True}, timeout=10)
-                
-        print(f"[Notion Sync] 성공적으로 {len(holdings_list)}개의 잔고 종목을 노션 데이터베이스와 동기화 완료했습니다.")
-    except Exception as e:
-        print(f"[Notion Sync Error] {e}")
-
 def sync_market_news_to_notion(news_list, fast_translate=False):
     """
     주요 종목 뉴스 및 센티먼트 리스트를 노션 데이터베이스('📰 주요 시장 뉴스')와 동기화합니다.
@@ -659,10 +446,12 @@ def ensure_recommend_db_properties(db_id):
     except Exception as e:
         print(f"[Notion Properties Warning] Failed to update recommended portfolio schema: {e}")
 
-def sync_recommended_portfolio_to_notion(portfolio_list):
+def sync_recommended_portfolio_to_notion(portfolio_list, market_filter=None):
     """
     김민겸 퀀트 추천 포트폴리오를 노션 데이터베이스('💡 퀀트 추천 포트폴리오')와 완벽 동기화합니다.
     - portfolio_list: {"symbol": sym, "name": name, "market": mkt, "industry": ind, "score": score, "weight": weight, "amount": amt, "action": act} 리스트
+    - market_filter: 'KRX' 또는 'SP500'이 주어지면 해당 시장 항목만 건드리고, 반대 시장의 기존 페이지(오늘 날짜 포함)는
+      완전히 건드리지 않습니다. (국장/미장 실행 시간이 분리되어 있어, 상대 시장 데이터의 편집 시각이 오염되는 것을 방지)
     """
     if not NOTION_TOKEN:
         return
@@ -711,7 +500,15 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                 props = page.get("properties", {})
                 date_prop = props.get("Date", {}).get("date", {})
                 page_date = date_prop.get("start", "") if date_prop else ""
-                
+
+                # market_filter가 지정된 경우, 반대 시장의 페이지는 조회/아카이브 대상에서 완전히 제외
+                page_market_name = (props.get("Market", {}).get("select", {}) or {}).get("name", "")
+                page_is_krx = "KRX" in page_market_name or "🇰🇷" in page_market_name
+                if market_filter == 'KRX' and not page_is_krx:
+                    continue
+                if market_filter == 'SP500' and page_is_krx:
+                    continue
+
                 # 오늘 이미 등록된 페이지라면 중복 방지를 위해 아카이브(삭제) 처리
                 if page_date.startswith(today_date_str):
                     requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
@@ -733,7 +530,8 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
                 
         # 2. 신규 추천 항목 생성 (국장 🇰🇷 우선 정렬 후 미장 🇺🇸 정렬)
         portfolio_list_sorted = sorted(portfolio_list, key=lambda x: 0 if x.get("market") in ["KRX", "KR"] else 1)
-        
+        created_count = 0
+
         for item in portfolio_list_sorted:
             create_url = "https://api.notion.com/v1/pages"
             
@@ -746,6 +544,13 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             amount = item.get("amount", 0.0)
             
             is_krx = market in ["KRX", "KR"] or sym.endswith(".KS") or sym.endswith(".KQ")
+
+            # market_filter가 지정된 경우, 반대 시장 종목은 신규 생성하지 않고 건너뜀
+            if market_filter == 'KRX' and not is_krx:
+                continue
+            if market_filter == 'SP500' and is_krx:
+                continue
+
             market_tag = "🇰🇷 KRX (국장)" if is_krx else "🇺🇸 S&P500 (미장)"
             flag = "🇰🇷" if is_krx else "🇺🇸"
             stock_display = f"{flag} {sym}"
@@ -807,8 +612,10 @@ def sync_recommended_portfolio_to_notion(portfolio_list):
             res_create = requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
             if res_create.status_code not in [200, 201]:
                 print(f"[Notion Recommend Warning] Page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
-                
-        print(f"[Notion Recommend] 성공적으로 {len(portfolio_list)}개의 추천 포트폴리오를 동기화 완료했습니다. (전일 대비 변동 기록 완료)")
+            else:
+                created_count += 1
+
+        print(f"[Notion Recommend] 성공적으로 {created_count}개의 추천 포트폴리오를 동기화 완료했습니다. (전일 대비 변동 기록 완료)")
     except Exception as e:
         print(f"[Notion Recommend Error] {e}")
 
@@ -835,10 +642,11 @@ def ensure_ranking_db_properties(db_id):
     except Exception as e:
         print(f"[Notion Properties Warning] Failed to update ranking database schema: {e}")
 
-def sync_rankings_to_notion(rankings_list):
+def sync_rankings_to_notion(rankings_list, market_filter=None):
     """
     국장 및 미장 종목 랭킹 리스트를 각각 '🏆 국장 퀀트 종목 랭킹' 및 '🏆 미장 퀀트 종목 랭킹' 데이터베이스에 동기화합니다.
     - rankings_list: [{"name": name, "symbol": sym, "market": mkt, "rank": rank, "score": score, "industry": ind}] 리스트
+    - market_filter: 'KRX' 또는 'SP500'이 주어지면 반대 시장의 랭킹 DB는 조회조차 하지 않고 완전히 건드리지 않습니다.
     """
     if not NOTION_TOKEN:
         return
@@ -863,7 +671,14 @@ def sync_rankings_to_notion(rankings_list):
         us_items = [item for item in rankings_list if item.get("market") != "KRX"]
         
         # 1. 오늘 날짜로 이미 동기화된 항목이 있다면 중복 제거를 위해 아카이브 처리
-        for db_id in [db_kr_id, db_us_id]:
+        # market_filter가 지정된 경우, 반대 시장의 랭킹 DB는 조회/아카이브 대상에서 완전히 제외
+        target_db_ids = []
+        if market_filter != 'SP500':
+            target_db_ids.append(db_kr_id)
+        if market_filter != 'KRX':
+            target_db_ids.append(db_us_id)
+
+        for db_id in target_db_ids:
             query_url = f"https://api.notion.com/v1/databases/{db_id}/query"
             res = requests.post(query_url, headers=HEADERS, json={"page_size": 100}, timeout=10)
             if res.status_code == 200:
@@ -875,9 +690,9 @@ def sync_rankings_to_notion(rankings_list):
                     if p_date.startswith(today_date_str):
                         requests.patch(f"https://api.notion.com/v1/pages/{page_id}", headers=HEADERS, json={"archived": True}, timeout=10)
                     
-        # 2. 국장 신규 랭킹 생성 (오늘 날짜 부여)
+        # 2. 국장 신규 랭킹 생성 (오늘 날짜 부여) - market_filter='SP500'이면 국장 DB는 건드리지 않음
         # 순위가 정돈되어 들어가도록 Rank 역순(20위부터 1위)으로 생성하여 노션 디폴트 정렬 시 1위가 맨 위로 오도록 함
-        kr_items_sorted = sorted(kr_items, key=lambda x: x.get("rank", 999), reverse=True)
+        kr_items_sorted = sorted(kr_items, key=lambda x: x.get("rank", 999), reverse=True) if market_filter != 'SP500' else []
         for item in kr_items_sorted:
             create_url = "https://api.notion.com/v1/pages"
             rank_val = item.get("rank", 0)
@@ -910,9 +725,9 @@ def sync_rankings_to_notion(rankings_list):
             if res_create.status_code not in [200, 201]:
                 print(f"[Notion Ranking Warning] KR page creation failed. Status: {res_create.status_code}, Res: {res_create.text}")
             
-        # 3. 미장 신규 랭킹 생성 (오늘 날짜 부여)
+        # 3. 미장 신규 랭킹 생성 (오늘 날짜 부여) - market_filter='KRX'이면 미장 DB는 건드리지 않음
         # 순위가 정돈되어 들어가도록 Rank 역순(20위부터 1위)으로 생성
-        us_items_sorted = sorted(us_items, key=lambda x: x.get("rank", 999), reverse=True)
+        us_items_sorted = sorted(us_items, key=lambda x: x.get("rank", 999), reverse=True) if market_filter != 'KRX' else []
         for item in us_items_sorted:
             create_url = "https://api.notion.com/v1/pages"
             rank_val = item.get("rank", 0)
@@ -948,44 +763,6 @@ def sync_rankings_to_notion(rankings_list):
         print(f"[Notion Ranking] 국장/미장 각각 랭킹 동기화를 완료했습니다.")
     except Exception as e:
         print(f"[Notion Ranking Error] {e}")
-
-def log_trade_to_notion(symbol, name, side, qty, price, val_krw, reason=""):
-    """
-    체결된 거래 정보를 노션 데이터베이스('주식 거래 일지')에 새 로그로 기록합니다.
-    """
-    if not NOTION_TOKEN:
-        return
-        
-    db_id = find_database_by_name("주식 거래 일지")
-    if not db_id:
-        print("[Notion Log] '주식 거래 일지' 데이터베이스를 찾을 수 없어 거래 일지 기록을 건너뜁니다.")
-        return
-        
-    try:
-        now_str = get_kst_now().isoformat()
-        title = f"{name} { '매수' if side == 'BUY' else '매도'}"
-        
-        properties = {
-            "Name": {"title": [{"text": {"content": title}}]},
-            "Date": {"date": {"start": now_str}},
-            "Symbol": {"rich_text": [{"text": {"content": symbol}}]},
-            "Side": {"select": {"name": side}},
-            "Qty": {"number": float(qty)},
-            "Price": {"number": float(price)},
-            "Value": {"number": float(val_krw)},
-            "Reason": {"rich_text": [{"text": {"content": str(reason)}}]}
-        }
-        
-        create_url = "https://api.notion.com/v1/pages"
-        payload = {
-            "parent": {"database_id": db_id},
-            "properties": properties
-        }
-        requests.post(create_url, headers=HEADERS, json=payload, timeout=10)
-        res.raise_for_status()
-        print(f"[Notion Log] 성공적으로 {name}({symbol})의 {side} 거래 정보를 노션 일지에 기록했습니다.")
-    except Exception as e:
-        print(f"[Notion Log Error] {e}")
 
 def setup_notion_workspace():
     """
@@ -1265,10 +1042,11 @@ def setup_notion_workspace():
     except Exception as e:
         return f"노션 자동 설정 중 오류 발생: {e}"
 
-def sync_sell_signals_to_notion(sell_list):
+def sync_sell_signals_to_notion(sell_list, market_filter=None):
     """
     오늘 매도(SELL) 시그널이 발생한 종목들을 '🚨 퀀트 매도 시그널' 데이터베이스에 동기화합니다.
     - sell_list: [{"symbol": sym, "name": name, "reason": reason, "market": mkt}] 리스트
+    - market_filter: 'KRX' 또는 'SP500'이 주어지면 반대 시장 항목(기존 페이지 포함)은 완전히 건드리지 않습니다.
     """
     if not NOTION_TOKEN:
         return
@@ -1292,9 +1070,17 @@ def sync_sell_signals_to_notion(sell_list):
             for page in res.json().get("results", []):
                 date_prop = page.get("properties", {}).get("Date", {}).get("date", {})
                 page_date = date_prop.get("start", "") if date_prop else ""
+
+                page_market_name = (page.get("properties", {}).get("Market", {}).get("select", {}) or {}).get("name", "")
+                page_is_krx = page_market_name == "KRX"
+                if market_filter == 'KRX' and not page_is_krx:
+                    continue
+                if market_filter == 'SP500' and page_is_krx:
+                    continue
+
                 if page_date.startswith(today_date_str):
                     requests.patch(f"https://api.notion.com/v1/pages/{page.get('id')}", headers=HEADERS, json={"archived": True}, timeout=10)
-                    
+
         # 2. 오늘 매도 항목 생성
         if sell_list:
             for item in sell_list:
@@ -1303,6 +1089,12 @@ def sync_sell_signals_to_notion(sell_list):
                 name = item.get("name", "")
                 reason = item.get("reason", "손절선 이탈 또는 비중 교체")
                 mkt = item.get("market", "KRX" if (sym.endswith(".KS") or sym.endswith(".KQ")) else "S&P500")
+
+                item_is_krx = mkt == "KRX"
+                if market_filter == 'KRX' and not item_is_krx:
+                    continue
+                if market_filter == 'SP500' and item_is_krx:
+                    continue
                 
                 c_name = get_korean_company_name(sym)
                 clean_name = c_name if c_name != sym else name

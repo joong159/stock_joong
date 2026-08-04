@@ -15,7 +15,7 @@ requests.Session.request = patched_request
 # Ensure we import from the local folder
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from notion_sync import find_database_by_name, sync_market_news_to_notion, HEADERS
-from dashboard import fetch_stock_news
+from news_fetcher import fetch_stock_news
 
 def get_active_symbols_from_notion():
     """
