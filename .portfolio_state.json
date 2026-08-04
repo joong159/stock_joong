@@ -1,44 +1,20 @@
 {
-    "DXCM": {
-        "purchase_date": "2026-08-04 04:20:48",
-        "purchase_price": 87.30999755859375,
-        "highest_price": 87.30999755859375,
-        "purchase_qty": 1.0
-    },
-    "AMZN": {
-        "purchase_date": "2026-08-04 04:20:48",
-        "purchase_price": 284.0199890136719,
-        "highest_price": 284.0199890136719,
-        "purchase_qty": 1.0
-    },
     "GRMN": {
         "purchase_date": "2026-07-30 00:59:39",
         "purchase_price": 294.8299865722656,
-        "highest_price": 304.760009765625,
-        "purchase_qty": 1.0
-    },
-    "MSFT": {
-        "purchase_date": "2026-07-31 01:10:43",
-        "purchase_price": 451.1000061035156,
-        "highest_price": 487.6499938964844,
-        "purchase_qty": 1.0
-    },
-    "REGN": {
-        "purchase_date": "2026-08-03 01:11:47",
-        "purchase_price": 762.6300048828125,
-        "highest_price": 762.6300048828125,
-        "purchase_qty": 1.0
-    },
-    "CTSH": {
-        "purchase_date": "2026-07-30 00:59:39",
-        "purchase_price": 55.970001220703125,
-        "highest_price": 55.970001220703125,
+        "highest_price": 307.3599853515625,
         "purchase_qty": 1.0
     },
     "HPQ": {
         "purchase_date": "2026-07-27 10:51:52",
         "purchase_price": 25.75,
-        "highest_price": 28.40999984741211,
+        "highest_price": 28.81999969482422,
+        "purchase_qty": 1.0
+    },
+    "MSFT": {
+        "purchase_date": "2026-07-31 01:10:43",
+        "purchase_price": 451.1000061035156,
+        "highest_price": 492.80999755859375,
         "purchase_qty": 1.0
     }
 }
