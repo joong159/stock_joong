@@ -1,16 +1,4 @@
 {
-    "GRMN": {
-        "purchase_date": "2026-07-30 00:59:39",
-        "purchase_price": 294.8299865722656,
-        "highest_price": 307.3599853515625,
-        "purchase_qty": 1.0
-    },
-    "BAX": {
-        "purchase_date": "2026-08-05 01:00:08",
-        "purchase_price": 28.350000381469727,
-        "highest_price": 28.350000381469727,
-        "purchase_qty": 1.0
-    },
     "MSFT": {
         "purchase_date": "2026-07-31 01:10:43",
         "purchase_price": 451.1000061035156,
@@ -26,13 +14,13 @@
     "ZBRA": {
         "purchase_date": "2026-08-05 01:00:08",
         "purchase_price": 368.8299865722656,
-        "highest_price": 368.8299865722656,
+        "highest_price": 368.989990234375,
         "purchase_qty": 1.0
     },
-    "HPQ": {
-        "purchase_date": "2026-07-27 10:51:52",
-        "purchase_price": 25.75,
-        "highest_price": 28.81999969482422,
+    "SWK": {
+        "purchase_date": "2026-08-05 21:51:55",
+        "purchase_price": 103.2699966430664,
+        "highest_price": 103.2699966430664,
         "purchase_qty": 1.0
     }
 }
