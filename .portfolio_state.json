@@ -1,14 +1,20 @@
 {
-    "LDOS": {
-        "purchase_date": "2026-08-07 01:56:27",
-        "purchase_price": 135.25999450683594,
-        "highest_price": 137.57000732421875,
+    "HPQ": {
+        "purchase_date": "2026-08-07 21:15:56",
+        "purchase_price": 30.049999237060547,
+        "highest_price": 30.049999237060547,
         "purchase_qty": 1.0
     },
-    "MSFT": {
-        "purchase_date": "2026-07-31 01:10:43",
-        "purchase_price": 451.1000061035156,
-        "highest_price": 499.989990234375,
+    "PLTR": {
+        "purchase_date": "2026-08-10 00:05:51",
+        "purchase_price": 172.00999450683594,
+        "highest_price": 172.00999450683594,
+        "purchase_qty": 1.0
+    },
+    "ABNB": {
+        "purchase_date": "2026-08-10 00:05:51",
+        "purchase_price": 178.07000732421875,
+        "highest_price": 178.07000732421875,
         "purchase_qty": 1.0
     },
     "ZBRA": {
@@ -23,16 +29,22 @@
         "highest_price": 256.69000244140625,
         "purchase_qty": 1.0
     },
+    "LDOS": {
+        "purchase_date": "2026-08-07 01:56:27",
+        "purchase_price": 135.25999450683594,
+        "highest_price": 137.57000732421875,
+        "purchase_qty": 1.0
+    },
+    "MSFT": {
+        "purchase_date": "2026-07-31 01:10:43",
+        "purchase_price": 451.1000061035156,
+        "highest_price": 499.989990234375,
+        "purchase_qty": 1.0
+    },
     "SWK": {
         "purchase_date": "2026-08-07 21:15:56",
         "purchase_price": 103.88999938964844,
         "highest_price": 103.88999938964844,
-        "purchase_qty": 1.0
-    },
-    "HPQ": {
-        "purchase_date": "2026-08-07 21:15:56",
-        "purchase_price": 30.049999237060547,
-        "highest_price": 30.049999237060547,
         "purchase_qty": 1.0
     }
 }
