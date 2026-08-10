@@ -2,12 +2,17 @@ name: Auto Quant Rebalancing & News Sync
 
 on:
   schedule:
-    # 1. 🇰🇷 국장 봇 스케줄: 평일(월~금) 아침 08:30 KST (동시호가 주문 ➡️ 09:00 시가 체결)
-    #    (UTC 기준: 일~목 23:30 = KST 월~금 08:30)
-    - cron: '30 23 * * 0-4'
-    # 2. 🇺🇸 미장 봇 스케줄: 미장 개장일(화~토 새벽) 05:30 KST (장 마감 전 주문 ➡️ 06:00 종가 체결)
+    # 1. 🇰🇷 국장 봇 스케줄: 평일(월~금) 16:00 KST — 국장 마감(15:30) 30분 후, 당일 완성된 데이터로 업데이트
+    #    (UTC 기준: 월~금 07:00 = KST 월~금 16:00, 한국은 서머타임이 없어 연중 고정)
+    - cron: '0 7 * * 1-5'
+    # 2. 🇺🇸 미장 봇 스케줄(서머타임 EDT용): 미장 마감(16:00 ET = 05:00 KST) 30분 후인 05:30 KST
     #    (UTC 기준: 월~금 20:30 = KST 화~토 05:30)
     - cron: '30 20 * * 1-5'
+    # 3. 🇺🇸 미장 봇 스케줄(표준시 EST용): 미장 마감(16:00 ET = 06:00 KST) 30분 후인 06:30 KST
+    #    (UTC 기준: 월~금 21:30 = KST 화~토 06:30)
+    - cron: '30 21 * * 1-5'
+    # 2번/3번 중 실제 계절과 맞지 않는 쪽은 아래 "Determine Market Filter" 단계에서
+    # 실시간 서머타임 판별 후 자동으로 스킵됩니다 (사람이 수동으로 크론을 바꿀 필요 없음).
   workflow_dispatch: # 필요 시 언제든 수동 실행 가능 버튼 제공
     inputs:
       market_filter:
@@ -38,7 +43,40 @@ jobs:
         with:
           python-version: '3.10'
 
+      - name: Determine Market Filter
+        id: market
+        run: |
+          # 크론 스케줄 문자열로 이번 실행이 국장(16:00 KST)인지 미장(EDT 05:30 / EST 06:30 KST)인지 판별합니다.
+          # 미장 크론 2개(서머타임용/표준시용) 중, 지금 실제로 미국이 어느 시간대인지는
+          # 파이썬 표준 시간대 라이브러리(zoneinfo)로 매 실행마다 정확히 판별합니다.
+          # 계절이 안 맞는 쪽 크론이 울리면 이번 실행은 스킵됩니다.
+          # workflow_dispatch 수동 실행은 입력값을 그대로 사용(비워두면 국장+미장 전체 실행, 스킵 없음).
+          SCHEDULE="${{ github.event.schedule }}"
+          SKIP="false"
+
+          if [ "$SCHEDULE" = "0 7 * * 1-5" ]; then
+            FILTER="KRX"
+          elif [ "$SCHEDULE" = "30 20 * * 1-5" ] || [ "$SCHEDULE" = "30 21 * * 1-5" ]; then
+            IS_DST=$(python -c "import datetime; from zoneinfo import ZoneInfo; now_et = datetime.datetime.now(ZoneInfo('America/New_York')); print('true' if now_et.dst() != datetime.timedelta(0) else 'false')")
+            if [ "$IS_DST" = "true" ] && [ "$SCHEDULE" = "30 20 * * 1-5" ]; then
+              FILTER="SP500"
+            elif [ "$IS_DST" = "false" ] && [ "$SCHEDULE" = "30 21 * * 1-5" ]; then
+              FILTER="SP500"
+            else
+              SKIP="true"
+              FILTER=""
+              echo "현재 미국 서머타임 여부(DST=$IS_DST)와 이 크론($SCHEDULE)이 맞지 않아 이번 실행은 건너뜁니다."
+            fi
+          else
+            FILTER="${{ github.event.inputs.market_filter }}"
+          fi
+
+          echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
+          echo "skip=$SKIP" >> "$GITHUB_OUTPUT"
+          echo "이번 실행 대상 시장: ${FILTER:-전체(국장+미장)} / skip=$SKIP"
+
       - name: Cache Pip Dependencies
+        if: steps.market.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
@@ -47,6 +85,7 @@ jobs:
             ${{ runner.os }}-pip-
 
       - name: Cache HuggingFace Models
+        if: steps.market.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
@@ -55,27 +94,13 @@ jobs:
             ${{ runner.os }}-huggingface-
 
       - name: Install Dependencies
+        if: steps.market.outputs.skip != 'true'
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
-      - name: Determine Market Filter
-        id: market
-        run: |
-          # 크론 스케줄 문자열로 이번 실행이 국장(08:30 KST)인지 미장(05:30 KST)인지 판별합니다.
-          # workflow_dispatch 수동 실행은 입력값을 그대로 사용(비워두면 국장+미장 전체 실행).
-          SCHEDULE="${{ github.event.schedule }}"
-          if [ "$SCHEDULE" = "30 23 * * 0-4" ]; then
-            FILTER="KRX"
-          elif [ "$SCHEDULE" = "30 20 * * 1-5" ]; then
-            FILTER="SP500"
-          else
-            FILTER="${{ github.event.inputs.market_filter }}"
-          fi
-          echo "filter=$FILTER" >> "$GITHUB_OUTPUT"
-          echo "이번 실행 대상 시장: ${FILTER:-전체(국장+미장)}"
-
       - name: Run Quant Analyzer
+        if: steps.market.outputs.skip != 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
@@ -90,12 +115,14 @@ jobs:
           python quant_analyzer.py $MARKET_ARG
 
       - name: Run News Sync
+        if: steps.market.outputs.skip != 'true'
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python sync_news_hourly.py
 
       - name: Commit and Push Portfolio State
+        if: steps.market.outputs.skip != 'true'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
