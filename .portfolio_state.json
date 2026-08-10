@@ -48,33 +48,33 @@
         "purchase_qty": 1.0
     },
     "196170": {
-        "purchase_date": "2026-08-10 01:56:17",
-        "purchase_price": 350000.0,
-        "highest_price": 350000.0,
+        "purchase_date": "2026-08-10 08:23:36",
+        "purchase_price": 348000.0,
+        "highest_price": 348000.0,
+        "purchase_qty": 2.0
+    },
+    "058610": {
+        "purchase_date": "2026-08-10 08:23:36",
+        "purchase_price": 107400.0,
+        "highest_price": 107400.0,
+        "purchase_qty": 9.0
+    },
+    "080220": {
+        "purchase_date": "2026-08-10 08:23:36",
+        "purchase_price": 87700.0,
+        "highest_price": 87700.0,
+        "purchase_qty": 11.0
+    },
+    "214450": {
+        "purchase_date": "2026-08-10 08:23:36",
+        "purchase_price": 410000.0,
+        "highest_price": 410000.0,
         "purchase_qty": 2.0
     },
     "087010": {
-        "purchase_date": "2026-08-10 01:56:17",
-        "purchase_price": 189700.0,
-        "highest_price": 189700.0,
+        "purchase_date": "2026-08-10 08:23:36",
+        "purchase_price": 183100.0,
+        "highest_price": 183100.0,
         "purchase_qty": 5.0
-    },
-    "058610": {
-        "purchase_date": "2026-08-10 01:56:17",
-        "purchase_price": 104200.0,
-        "highest_price": 104200.0,
-        "purchase_qty": 9.0
-    },
-    "214450": {
-        "purchase_date": "2026-08-10 01:56:17",
-        "purchase_price": 397000.0,
-        "highest_price": 397000.0,
-        "purchase_qty": 2.0
-    },
-    "080220": {
-        "purchase_date": "2026-08-10 01:56:17",
-        "purchase_price": 83000.0,
-        "highest_price": 83000.0,
-        "purchase_qty": 12.0
     }
 }
