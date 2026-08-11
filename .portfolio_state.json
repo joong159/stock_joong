@@ -5,6 +5,12 @@
         "highest_price": 175.22999572753906,
         "purchase_qty": 1.0
     },
+    "IT": {
+        "purchase_date": "2026-08-10 21:18:43",
+        "purchase_price": 193.1699981689453,
+        "highest_price": 193.1699981689453,
+        "purchase_qty": 1.0
+    },
     "ABNB": {
         "purchase_date": "2026-08-10 00:05:51",
         "purchase_price": 178.07000732421875,
@@ -27,12 +33,6 @@
         "purchase_date": "2026-08-07 01:56:27",
         "purchase_price": 135.25999450683594,
         "highest_price": 139.10000610351562,
-        "purchase_qty": 1.0
-    },
-    "IT": {
-        "purchase_date": "2026-08-10 21:18:43",
-        "purchase_price": 193.1699981689453,
-        "highest_price": 193.1699981689453,
         "purchase_qty": 1.0
     },
     "MSFT": {
