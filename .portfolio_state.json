@@ -8,13 +8,7 @@
     "CRL": {
         "purchase_date": "2026-08-12 08:12:37",
         "purchase_price": 282.0,
-        "highest_price": 282.0,
-        "purchase_qty": 1.0
-    },
-    "EMR": {
-        "purchase_date": "2026-08-11 21:29:04",
-        "purchase_price": 164.3800048828125,
-        "highest_price": 164.3800048828125,
+        "highest_price": 284.3699951171875,
         "purchase_qty": 1.0
     },
     "ABNB": {
@@ -27,30 +21,6 @@
         "purchase_date": "2026-08-05 01:00:08",
         "purchase_price": 368.8299865722656,
         "highest_price": 383.05999755859375,
-        "purchase_qty": 1.0
-    },
-    "PLTR": {
-        "purchase_date": "2026-08-12 08:12:37",
-        "purchase_price": 174.94000244140625,
-        "highest_price": 174.94000244140625,
-        "purchase_qty": 1.0
-    },
-    "MSFT": {
-        "purchase_date": "2026-07-31 01:10:43",
-        "purchase_price": 451.1000061035156,
-        "highest_price": 506.05999755859375,
-        "purchase_qty": 1.0
-    },
-    "CTSH": {
-        "purchase_date": "2026-08-11 21:29:04",
-        "purchase_price": 58.599998474121094,
-        "highest_price": 58.599998474121094,
-        "purchase_qty": 1.0
-    },
-    "WDAY": {
-        "purchase_date": "2026-08-12 08:12:37",
-        "purchase_price": 181.27000427246094,
-        "highest_price": 181.27000427246094,
         "purchase_qty": 1.0
     }
 }
