@@ -1,26 +1,44 @@
 {
+    "ZBRA": {
+        "purchase_date": "2026-08-05 01:00:08",
+        "purchase_price": 368.8299865722656,
+        "highest_price": 383.05999755859375,
+        "purchase_qty": 1.0
+    },
+    "VEEV": {
+        "purchase_date": "2026-08-13 08:13:22",
+        "purchase_price": 241.50999450683594,
+        "highest_price": 241.50999450683594,
+        "purchase_qty": 1.0
+    },
+    "TSCO": {
+        "purchase_date": "2026-08-13 08:13:22",
+        "purchase_price": 36.43000030517578,
+        "highest_price": 36.43000030517578,
+        "purchase_qty": 1.0
+    },
+    "HPE": {
+        "purchase_date": "2026-08-13 08:13:22",
+        "purchase_price": 58.790000915527344,
+        "highest_price": 58.790000915527344,
+        "purchase_qty": 1.0
+    },
+    "SMCI": {
+        "purchase_date": "2026-08-13 08:13:22",
+        "purchase_price": 37.61000061035156,
+        "highest_price": 37.61000061035156,
+        "purchase_qty": 1.0
+    },
     "LDOS": {
         "purchase_date": "2026-08-07 01:56:27",
         "purchase_price": 135.25999450683594,
         "highest_price": 140.88999938964844,
         "purchase_qty": 1.0
     },
-    "CRL": {
-        "purchase_date": "2026-08-12 08:12:37",
-        "purchase_price": 282.0,
-        "highest_price": 284.3699951171875,
-        "purchase_qty": 1.0
-    },
     "ABNB": {
         "purchase_date": "2026-08-10 00:05:51",
         "purchase_price": 178.07000732421875,
         "highest_price": 184.97999572753906,
-        "purchase_qty": 1.0
-    },
-    "ZBRA": {
-        "purchase_date": "2026-08-05 01:00:08",
-        "purchase_price": 368.8299865722656,
-        "highest_price": 383.05999755859375,
         "purchase_qty": 1.0
     }
 }
