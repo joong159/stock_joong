@@ -1,20 +1,8 @@
 {
-    "ABNB": {
-        "purchase_date": "2026-08-10 00:05:51",
-        "purchase_price": 178.07000732421875,
-        "highest_price": 185.1300048828125,
-        "purchase_qty": 1.0
-    },
     "NEM": {
         "purchase_date": "2026-08-17 07:45:43",
         "purchase_price": 117.76000213623047,
-        "highest_price": 117.76000213623047,
-        "purchase_qty": 1.0
-    },
-    "NTAP": {
-        "purchase_date": "2026-08-17 07:45:43",
-        "purchase_price": 207.0800018310547,
-        "highest_price": 207.0800018310547,
+        "highest_price": 120.33000183105469,
         "purchase_qty": 1.0
     },
     "SMCI": {
@@ -26,55 +14,19 @@
     "SNDK": {
         "purchase_date": "2026-08-14 08:10:48",
         "purchase_price": 1528.1099853515625,
-        "highest_price": 1641.1099853515625,
-        "purchase_qty": 1.0
-    },
-    "HPE": {
-        "purchase_date": "2026-08-17 07:45:43",
-        "purchase_price": 58.709999084472656,
-        "highest_price": 58.709999084472656,
-        "purchase_qty": 1.0
-    },
-    "LDOS": {
-        "purchase_date": "2026-08-07 01:56:27",
-        "purchase_price": 135.25999450683594,
-        "highest_price": 143.8300018310547,
+        "highest_price": 1786.8499755859375,
         "purchase_qty": 1.0
     },
     "CRL": {
         "purchase_date": "2026-08-14 21:00:33",
         "purchase_price": 280.04998779296875,
-        "highest_price": 280.04998779296875,
+        "highest_price": 286.6400146484375,
         "purchase_qty": 1.0
     },
-    "319400": {
-        "purchase_date": "2026-08-17 07:45:45",
-        "purchase_price": 28000.0,
-        "highest_price": 28000.0,
-        "purchase_qty": 35.0
-    },
-    "058610": {
-        "purchase_date": "2026-08-17 07:45:45",
-        "purchase_price": 118600.0,
-        "highest_price": 118600.0,
-        "purchase_qty": 8.0
-    },
-    "108490": {
-        "purchase_date": "2026-08-17 07:45:45",
-        "purchase_price": 280000.0,
-        "highest_price": 280000.0,
-        "purchase_qty": 3.0
-    },
-    "257720": {
-        "purchase_date": "2026-08-17 07:45:45",
-        "purchase_price": 42850.0,
-        "highest_price": 42850.0,
-        "purchase_qty": 23.0
-    },
-    "087010": {
-        "purchase_date": "2026-08-17 07:45:45",
-        "purchase_price": 194000.0,
-        "highest_price": 194000.0,
-        "purchase_qty": 5.0
+    "REGN": {
+        "purchase_date": "2026-08-17 20:59:17",
+        "purchase_price": 805.9299926757812,
+        "highest_price": 805.9299926757812,
+        "purchase_qty": 1.0
     }
 }
