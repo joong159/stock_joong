@@ -1,1 +1,1 @@
-{"US": "SPRING", "KR": "SPRING"}
+{"US": "UNKNOWN", "KR": "UNKNOWN"}
