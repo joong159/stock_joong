@@ -1,22 +1,4 @@
 {
-    "FOXA": {
-        "purchase_date": "2026-08-18 07:34:05",
-        "purchase_price": 69.19000244140625,
-        "highest_price": 69.19000244140625,
-        "purchase_qty": 1.0
-    },
-    "CRL": {
-        "purchase_date": "2026-08-14 21:00:33",
-        "purchase_price": 280.04998779296875,
-        "highest_price": 286.6400146484375,
-        "purchase_qty": 1.0
-    },
-    "NEM": {
-        "purchase_date": "2026-08-17 07:45:43",
-        "purchase_price": 117.76000213623047,
-        "highest_price": 120.33000183105469,
-        "purchase_qty": 1.0
-    },
     "SNDK": {
         "purchase_date": "2026-08-14 08:10:48",
         "purchase_price": 1528.1099853515625,
@@ -26,13 +8,13 @@
     "ABNB": {
         "purchase_date": "2026-08-18 07:34:05",
         "purchase_price": 179.2899932861328,
-        "highest_price": 179.2899932861328,
+        "highest_price": 183.25,
         "purchase_qty": 1.0
     },
     "NTAP": {
         "purchase_date": "2026-08-18 07:34:05",
         "purchase_price": 204.1999969482422,
-        "highest_price": 204.1999969482422,
+        "highest_price": 204.7100067138672,
         "purchase_qty": 1.0
     },
     "SMCI": {
@@ -41,16 +23,16 @@
         "highest_price": 39.84000015258789,
         "purchase_qty": 1.0
     },
-    "ZBRA": {
-        "purchase_date": "2026-08-18 07:34:05",
-        "purchase_price": 371.260009765625,
-        "highest_price": 371.260009765625,
-        "purchase_qty": 1.0
-    },
     "LDOS": {
         "purchase_date": "2026-08-18 07:34:05",
         "purchase_price": 142.25,
-        "highest_price": 142.25,
+        "highest_price": 143.47999572753906,
+        "purchase_qty": 1.0
+    },
+    "FERG": {
+        "purchase_date": "2026-08-18 20:56:11",
+        "purchase_price": 244.47000122070312,
+        "highest_price": 244.47000122070312,
         "purchase_qty": 1.0
     }
 }
