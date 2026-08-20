@@ -2,19 +2,7 @@
     "CPRT": {
         "purchase_date": "2026-08-20 07:35:33",
         "purchase_price": 33.849998474121094,
-        "highest_price": 33.849998474121094,
-        "purchase_qty": 1.0
-    },
-    "WDAY": {
-        "purchase_date": "2026-08-19 21:00:03",
-        "purchase_price": 198.4199981689453,
-        "highest_price": 198.4199981689453,
-        "purchase_qty": 1.0
-    },
-    "EL": {
-        "purchase_date": "2026-08-20 07:35:33",
-        "purchase_price": 98.01000213623047,
-        "highest_price": 98.01000213623047,
+        "highest_price": 34.33000183105469,
         "purchase_qty": 1.0
     },
     "SNDK": {
@@ -29,22 +17,16 @@
         "highest_price": 174.3800048828125,
         "purchase_qty": 1.0
     },
-    "LDOS": {
-        "purchase_date": "2026-08-18 07:34:05",
-        "purchase_price": 142.25,
-        "highest_price": 146.30999755859375,
+    "ABNB": {
+        "purchase_date": "2026-08-20 21:01:36",
+        "purchase_price": 185.0,
+        "highest_price": 185.0,
         "purchase_qty": 1.0
     },
     "NEM": {
         "purchase_date": "2026-08-19 21:00:03",
         "purchase_price": 125.08000183105469,
-        "highest_price": 125.08000183105469,
-        "purchase_qty": 1.0
-    },
-    "IT": {
-        "purchase_date": "2026-08-19 21:00:03",
-        "purchase_price": 192.82000732421875,
-        "highest_price": 192.82000732421875,
+        "highest_price": 127.63999938964844,
         "purchase_qty": 1.0
     }
 }
