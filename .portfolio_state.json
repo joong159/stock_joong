@@ -1,14 +1,8 @@
 {
-    "CPRT": {
-        "purchase_date": "2026-08-20 07:35:33",
-        "purchase_price": 33.849998474121094,
-        "highest_price": 34.33000183105469,
-        "purchase_qty": 1.0
-    },
     "NEM": {
         "purchase_date": "2026-08-19 21:00:03",
         "purchase_price": 125.08000183105469,
-        "highest_price": 127.63999938964844,
+        "highest_price": 131.5800018310547,
         "purchase_qty": 1.0
     },
     "MRNA": {
@@ -29,10 +23,10 @@
         "highest_price": 1786.8499755859375,
         "purchase_qty": 1.0
     },
-    "ABNB": {
-        "purchase_date": "2026-08-20 21:01:36",
-        "purchase_price": 185.0,
-        "highest_price": 185.0,
+    "EL": {
+        "purchase_date": "2026-08-21 20:54:59",
+        "purchase_price": 101.94000244140625,
+        "highest_price": 101.94000244140625,
         "purchase_qty": 1.0
     }
 }
