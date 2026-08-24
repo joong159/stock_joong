@@ -1,8 +1,26 @@
 {
+    "AES": {
+        "purchase_date": "2026-08-24 07:51:29",
+        "purchase_price": 14.770000457763672,
+        "highest_price": 14.770000457763672,
+        "purchase_qty": 1.0
+    },
     "NEM": {
         "purchase_date": "2026-08-19 21:00:03",
         "purchase_price": 125.08000183105469,
         "highest_price": 131.5800018310547,
+        "purchase_qty": 1.0
+    },
+    "HOOD": {
+        "purchase_date": "2026-08-24 07:51:29",
+        "purchase_price": 108.12999725341797,
+        "highest_price": 108.12999725341797,
+        "purchase_qty": 1.0
+    },
+    "SNDK": {
+        "purchase_date": "2026-08-14 08:10:48",
+        "purchase_price": 1528.1099853515625,
+        "highest_price": 1786.8499755859375,
         "purchase_qty": 1.0
     },
     "MRNA": {
@@ -17,16 +35,46 @@
         "highest_price": 334.70001220703125,
         "purchase_qty": 1.0
     },
-    "SNDK": {
-        "purchase_date": "2026-08-14 08:10:48",
-        "purchase_price": 1528.1099853515625,
-        "highest_price": 1786.8499755859375,
-        "purchase_qty": 1.0
-    },
     "EL": {
         "purchase_date": "2026-08-21 20:54:59",
         "purchase_price": 101.94000244140625,
         "highest_price": 101.94000244140625,
         "purchase_qty": 1.0
+    },
+    "PLTR": {
+        "purchase_date": "2026-08-24 07:51:29",
+        "purchase_price": 179.94000244140625,
+        "highest_price": 179.94000244140625,
+        "purchase_qty": 1.0
+    },
+    "257720": {
+        "purchase_date": "2026-08-24 07:51:32",
+        "purchase_price": 49450.0,
+        "highest_price": 49450.0,
+        "purchase_qty": 20.0
+    },
+    "087010": {
+        "purchase_date": "2026-08-24 07:51:32",
+        "purchase_price": 182900.0,
+        "highest_price": 182900.0,
+        "purchase_qty": 5.0
+    },
+    "131290": {
+        "purchase_date": "2026-08-24 07:51:32",
+        "purchase_price": 245500.0,
+        "highest_price": 245500.0,
+        "purchase_qty": 4.0
+    },
+    "108490": {
+        "purchase_date": "2026-08-24 07:51:32",
+        "purchase_price": 247500.0,
+        "highest_price": 247500.0,
+        "purchase_qty": 4.0
+    },
+    "310210": {
+        "purchase_date": "2026-08-24 07:51:32",
+        "purchase_price": 167600.0,
+        "highest_price": 167600.0,
+        "purchase_qty": 5.0
     }
 }
