@@ -1,20 +1,14 @@
 {
-    "FCX": {
-        "purchase_date": "2026-08-26 07:40:05",
-        "purchase_price": 79.91000366210938,
-        "highest_price": 79.91000366210938,
-        "purchase_qty": 1.0
-    },
-    "SNDK": {
-        "purchase_date": "2026-08-25 07:39:04",
-        "purchase_price": 1493.1199951171875,
-        "highest_price": 1499.3699951171875,
-        "purchase_qty": 1.0
-    },
     "NEM": {
         "purchase_date": "2026-08-19 21:00:03",
         "purchase_price": 125.08000183105469,
         "highest_price": 135.13999938964844,
+        "purchase_qty": 1.0
+    },
+    "FCX": {
+        "purchase_date": "2026-08-26 07:40:05",
+        "purchase_price": 79.91000366210938,
+        "highest_price": 79.91000366210938,
         "purchase_qty": 1.0
     },
     "MRNA": {
@@ -23,10 +17,16 @@
         "highest_price": 174.3800048828125,
         "purchase_qty": 1.0
     },
-    "NDSN": {
-        "purchase_date": "2026-08-21 07:38:44",
-        "purchase_price": 334.70001220703125,
-        "highest_price": 334.70001220703125,
+    "EL": {
+        "purchase_date": "2026-08-27 18:01:58",
+        "purchase_price": 106.19999694824219,
+        "highest_price": 106.19999694824219,
+        "purchase_qty": 1.0
+    },
+    "VEEV": {
+        "purchase_date": "2026-08-27 18:01:58",
+        "purchase_price": 284.9599914550781,
+        "highest_price": 284.9599914550781,
         "purchase_qty": 1.0
     }
 }
