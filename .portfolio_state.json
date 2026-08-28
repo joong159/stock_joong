@@ -1,26 +1,38 @@
 {
-    "NEM": {
-        "purchase_date": "2026-08-19 21:00:03",
-        "purchase_price": 125.08000183105469,
-        "highest_price": 135.13999938964844,
-        "purchase_qty": 1.0
-    },
     "MRNA": {
         "purchase_date": "2026-08-20 07:35:33",
         "purchase_price": 174.3800048828125,
         "highest_price": 174.3800048828125,
         "purchase_qty": 1.0
     },
-    "EL": {
-        "purchase_date": "2026-08-27 18:01:58",
-        "purchase_price": 106.19999694824219,
-        "highest_price": 106.20999908447266,
+    "PSKY": {
+        "purchase_date": "2026-08-28 19:11:05",
+        "purchase_price": 10.845000267028809,
+        "highest_price": 10.845000267028809,
         "purchase_qty": 1.0
     },
-    "VEEV": {
-        "purchase_date": "2026-08-27 18:01:58",
-        "purchase_price": 284.9599914550781,
-        "highest_price": 284.9599914550781,
+    "CRM": {
+        "purchase_date": "2026-08-28 19:11:05",
+        "purchase_price": 259.56500244140625,
+        "highest_price": 259.56500244140625,
+        "purchase_qty": 1.0
+    },
+    "DASH": {
+        "purchase_date": "2026-08-28 19:11:05",
+        "purchase_price": 236.7899932861328,
+        "highest_price": 236.7899932861328,
+        "purchase_qty": 1.0
+    },
+    "SNDK": {
+        "purchase_date": "2026-08-28 19:11:05",
+        "purchase_price": 1479.5400390625,
+        "highest_price": 1479.5400390625,
+        "purchase_qty": 1.0
+    },
+    "WDAY": {
+        "purchase_date": "2026-08-28 19:11:05",
+        "purchase_price": 205.52999877929688,
+        "highest_price": 205.52999877929688,
         "purchase_qty": 1.0
     }
 }
