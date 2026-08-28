@@ -5,12 +5,6 @@
         "highest_price": 135.13999938964844,
         "purchase_qty": 1.0
     },
-    "FCX": {
-        "purchase_date": "2026-08-26 07:40:05",
-        "purchase_price": 79.91000366210938,
-        "highest_price": 79.91000366210938,
-        "purchase_qty": 1.0
-    },
     "MRNA": {
         "purchase_date": "2026-08-20 07:35:33",
         "purchase_price": 174.3800048828125,
@@ -20,7 +14,7 @@
     "EL": {
         "purchase_date": "2026-08-27 18:01:58",
         "purchase_price": 106.19999694824219,
-        "highest_price": 106.19999694824219,
+        "highest_price": 106.20999908447266,
         "purchase_qty": 1.0
     },
     "VEEV": {
