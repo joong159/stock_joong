@@ -8,7 +8,13 @@
     "PSKY": {
         "purchase_date": "2026-08-28 19:11:05",
         "purchase_price": 10.845000267028809,
-        "highest_price": 10.845000267028809,
+        "highest_price": 10.880000114440918,
+        "purchase_qty": 1.0
+    },
+    "VEEV": {
+        "purchase_date": "2026-08-29 02:57:32",
+        "purchase_price": 276.69000244140625,
+        "highest_price": 276.69000244140625,
         "purchase_qty": 1.0
     },
     "CRM": {
@@ -26,7 +32,7 @@
     "SNDK": {
         "purchase_date": "2026-08-28 19:11:05",
         "purchase_price": 1479.5400390625,
-        "highest_price": 1479.5400390625,
+        "highest_price": 1484.97998046875,
         "purchase_qty": 1.0
     },
     "WDAY": {
