@@ -2,13 +2,13 @@
     "SNDK": {
         "purchase_date": "2026-08-28 19:11:05",
         "purchase_price": 1479.5400390625,
-        "highest_price": 1522.0,
+        "highest_price": 1566.699951171875,
         "purchase_qty": 1.0
     },
     "NOW": {
         "purchase_date": "2026-08-31 14:35:56",
         "purchase_price": 145.3350067138672,
-        "highest_price": 145.3350067138672,
+        "highest_price": 147.99000549316406,
         "purchase_qty": 1.0
     },
     "TYL": {
@@ -38,43 +38,7 @@
     "VEEV": {
         "purchase_date": "2026-08-29 02:57:32",
         "purchase_price": 276.69000244140625,
-        "highest_price": 285.3800048828125,
+        "highest_price": 285.69000244140625,
         "purchase_qty": 1.0
-    },
-    "DASH": {
-        "purchase_date": "2026-08-28 19:11:05",
-        "purchase_price": 236.7899932861328,
-        "highest_price": 236.7899932861328,
-        "purchase_qty": 1.0
-    },
-    "257720": {
-        "purchase_date": "2026-08-31 14:35:59",
-        "purchase_price": 54200.0,
-        "highest_price": 54200.0,
-        "purchase_qty": 18.0
-    },
-    "108490": {
-        "purchase_date": "2026-08-31 14:35:59",
-        "purchase_price": 257500.0,
-        "highest_price": 257500.0,
-        "purchase_qty": 3.0
-    },
-    "222800": {
-        "purchase_date": "2026-08-31 14:35:59",
-        "purchase_price": 129300.0,
-        "highest_price": 129300.0,
-        "purchase_qty": 7.0
-    },
-    "440110": {
-        "purchase_date": "2026-08-31 14:35:59",
-        "purchase_price": 65700.0,
-        "highest_price": 65700.0,
-        "purchase_qty": 15.0
-    },
-    "403870": {
-        "purchase_date": "2026-08-31 14:35:59",
-        "purchase_price": 50200.0,
-        "highest_price": 50200.0,
-        "purchase_qty": 19.0
     }
 }
