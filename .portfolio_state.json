@@ -1,10 +1,4 @@
 {
-    "HPE": {
-        "purchase_date": "2026-09-04 11:55:34",
-        "purchase_price": 54.439998626708984,
-        "highest_price": 54.439998626708984,
-        "purchase_qty": 1.0
-    },
     "DE": {
         "purchase_date": "2026-09-02 11:52:05",
         "purchase_price": 676.0800170898438,
@@ -26,13 +20,13 @@
     "DELL": {
         "purchase_date": "2026-09-03 11:53:00",
         "purchase_price": 492.20001220703125,
-        "highest_price": 516.3900146484375,
+        "highest_price": 524.1400146484375,
         "purchase_qty": 1.0
     },
     "SNDK": {
         "purchase_date": "2026-08-28 19:11:05",
         "purchase_price": 1479.5400390625,
-        "highest_price": 1566.699951171875,
+        "highest_price": 1740.0,
         "purchase_qty": 1.0
     }
 }
